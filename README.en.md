@@ -49,8 +49,11 @@ dsh --version
 ### Option A: from GitHub (recommended)
 
 ```powershell
-# Pin a commit so a later push cannot silently change the code you run
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#<commit-sha>
+# Pin the release tag
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.0
+
+# Or pin the exact commit
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#dbc85c5
 ```
 
 Use `--profile desktop` for the desktop app. The plugin manager / agent equivalent is:

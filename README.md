@@ -61,8 +61,11 @@ dsh --version
 ### 方式 A：从 GitHub 安装（推荐）
 
 ```powershell
-# 建议固定到某个提交，避免仓库之后的更新悄悄改变你运行的代码
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#<commit-sha>
+# 固定到标签（当前发布版本）
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.0
+
+# 或固定到具体提交，最严格
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#dbc85c5
 ```
 
 桌面 App 用 `--profile desktop`。也可以在 DSH 的插件页面（或让 Agent 调 `plugin_manager`）用包 spec 安装：

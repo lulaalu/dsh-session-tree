@@ -3,6 +3,7 @@
 <p align="center">DeepSeek Harness 的会话树：把同一工作区的会话、每一轮对话和分叉画成一张可浏览的地图</p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/@lulaalu/dsh-session-tree"><img src="https://img.shields.io/npm/v/@lulaalu/dsh-session-tree?style=flat-square&logo=npm&label=npm" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3da639?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe?style=flat-square" alt="DeepSeek Harness 0.2.x">
   <img src="https://img.shields.io/badge/build-none-9aa3b2?style=flat-square" alt="No build step">
@@ -107,7 +108,7 @@ plugin_manager install_bundle target="github:lulaalu/dsh-session-tree"
 dsh plugin --profile web add @lulaalu/dsh-session-tree
 ```
 
-包名是 scoped 的 `@lulaalu/dsh-session-tree`；未发布 npm 之前请用方式 A。
+包名是 scoped 的 `@lulaalu/dsh-session-tree`，已发布到 npm；从 GitHub 安装同样可用。
 
 ### 方式 D：本地目录（开发用）
 

@@ -3,6 +3,7 @@
 <p align="center">A per-workspace map of DeepSeek Harness sessions, turns and fork branches in the Web UI</p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/@lulaalu/dsh-session-tree"><img src="https://img.shields.io/npm/v/@lulaalu/dsh-session-tree?style=flat-square&logo=npm&label=npm" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3da639?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe?style=flat-square" alt="DeepSeek Harness 0.2.x">
 </p>
@@ -98,7 +99,7 @@ The index is maintained by this project itself (market index format 1) and pins 
 dsh plugin --profile web add @lulaalu/dsh-session-tree
 ```
 
-The package name is scoped as `@lulaalu/dsh-session-tree`; until it is published to npm, use Option A.
+The package name is scoped as `@lulaalu/dsh-session-tree` and published to npm; installing from GitHub works too.
 
 ### Option D: local checkout (development)
 

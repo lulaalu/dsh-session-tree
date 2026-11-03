@@ -1,6 +1,6 @@
 {
-  "name": "dsh-session-tree",
-  "version": "0.1.0",
+  "name": "@lulaalu/dsh-session-tree",
+  "version": "0.1.1",
   "description": "Session Tree: a per-workspace map of DeepSeek Harness sessions, turns and fork branches in the Web UI",
   "type": "module",
   "main": "index.js",
@@ -38,6 +38,9 @@
     "branch"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lulaalu/dsh-session-tree.git"

@@ -1,3 +1,3 @@
 - insert:
     - id: session-tree
-      name: 'dsh-session-tree'
+      name: '@lulaalu/dsh-session-tree'

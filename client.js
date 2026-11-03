@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-	id: 'dsh-session-tree',
+	id: '@lulaalu/dsh-session-tree',
 	factory: (require) => {
 		const React = require('react');
 		const h = React.createElement;
@@ -149,13 +149,13 @@ window.__ModuleLoader__.load({
 			'@keyframes st-flash{from{outline:2px solid var(--st-accent);outline-offset:3px}to{outline:2px solid transparent;outline-offset:3px}}',
 			'[data-session-tree-flash]{animation:st-flash 1.5s ease-out}',
 		].join('');
-		const CSS_TAG_ID = 'dsh-session-tree/panel.css';
+		const CSS_TAG_ID = '@lulaalu/dsh-session-tree/panel.css';
 
 		function installStyles() {
 			if (typeof document === 'undefined') return () => {};
 			if (document.querySelector('style[data-plugin-css="' + CSS_TAG_ID + '"]') !== null) return () => {};
 			const tag = document.createElement('style');
-			tag.dataset.plugin = 'dsh-session-tree';
+			tag.dataset.plugin = '@lulaalu/dsh-session-tree';
 			tag.dataset.pluginCss = CSS_TAG_ID;
 			tag.textContent = CSS;
 			document.head.appendChild(tag);

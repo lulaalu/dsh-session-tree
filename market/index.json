@@ -1,0 +1,53 @@
+{
+  "format": 1,
+  "title": {
+    "en": "dsh-session-tree",
+    "zh": "会话树"
+  },
+  "description": {
+    "en": "A per-workspace map of DeepSeek Harness sessions, turns and forks: one prompt + one reply is a node, a session is a row, a fork is an edge.",
+    "zh": "以「一轮对话」为节点画出的工作区会话地图：一行一会话、一列一轮，分叉与子会话一眼可见。"
+  },
+  "metadata": {
+    "categories": {},
+    "labels": {},
+    "sortKeys": {}
+  },
+  "plugins": [
+    {
+      "name": "@lulaalu/dsh-session-tree",
+      "title": {
+        "en": "Session Tree",
+        "zh": "会话树"
+      },
+      "description": {
+        "en": "Session Tree: a per-workspace map of DeepSeek Harness sessions, turns and fork branches in the Web UI",
+        "zh": "DeepSeek Harness 的会话树：把同一工作区的会话、每一轮对话和分叉画成一张可浏览的地图。"
+      },
+      "icon": "https://cdn.jsdelivr.net/gh/lulaalu/dsh-session-tree@main/icon.svg",
+      "homepage": "https://github.com/lulaalu/dsh-session-tree#readme",
+      "repository": {
+        "url": "https://github.com/lulaalu/dsh-session-tree"
+      },
+      "metadata": {
+        "keywords": ["dsh-plugin"],
+        "labels": [],
+        "sortKeys": {}
+      },
+      "versions": [
+        {
+          "version": "0.1.1",
+          "publishTimestamp": 1793726315,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lulaalu/dsh-session-tree.git",
+            "commit": "e7e192234e333ff65ec8f4090d188ad099c252a4"
+          },
+          "engines": {
+            "dsh": ">=0.2.0 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}

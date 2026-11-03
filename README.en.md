@@ -68,14 +68,13 @@ The page has three parts:
 dsh --version
 ```
 
+> Several projects share the name: pin the repository `lulaalu/dsh-session-tree`. The unscoped npm package `dsh-session-tree` belongs to a different project — do **not** install it with `dsh plugin add dsh-session-tree`.
+
 ### Option A: from GitHub (recommended)
 
 ```powershell
 # Pin the release tag
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.0
-
-# Or pin the exact commit
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#dbc85c5
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.1
 ```
 
 Use `--profile desktop` for the desktop app. The plugin manager / agent equivalent is:
@@ -84,7 +83,24 @@ Use `--profile desktop` for the desktop app. The plugin manager / agent equivale
 plugin_manager install_bundle target="github:lulaalu/dsh-session-tree"
 ```
 
-### Option B: local checkout (development)
+### Option B: from the plugin store (self-hosted market index)
+
+The store only lists plugins from configured market index sources. Add this project's index and it becomes searchable there:
+
+1. **Settings → Plugins → Discover → Index sources**, add `https://cdn.jsdelivr.net/gh/lulaalu/dsh-session-tree@main/market/index.json`
+2. Search for "Session Tree" on the Discover page and install it.
+
+The index is maintained by this project itself (market index format 1) and pins a fixed commit of this repository.
+
+### Option C: npm
+
+```powershell
+dsh plugin --profile web add @lulaalu/dsh-session-tree
+```
+
+The package name is scoped as `@lulaalu/dsh-session-tree`; until it is published to npm, use Option A.
+
+### Option D: local checkout (development)
 
 ```powershell
 dsh plugin --profile web add D:\path\to\dsh-session-tree
@@ -92,17 +108,17 @@ dsh plugin --profile web add D:\path\to\dsh-session-tree
 
 This is a pnpm `link:` install: files are not copied, the profile only records a directory link. After editing, let the Host re-read the bundle (disable and re-enable the plugin row) and refresh the page.
 
-### Option C: tarball
+### Option E: tarball
 
 ```powershell
 pnpm pack
-dsh plugin --profile web add .\dsh-session-tree-0.1.0.tgz
+dsh plugin --profile web add .\lulaalu-dsh-session-tree-0.1.1.tgz
 ```
 
 ### Uninstall
 
 ```powershell
-dsh plugin --profile web remove dsh-session-tree
+dsh plugin --profile web remove @lulaalu/dsh-session-tree
 ```
 
 ### Where did the panel go?
@@ -169,6 +185,7 @@ Local iteration loop: edit, disable and re-enable the `include:session-tree` plu
 ├── client.js           # entire Web client UI (plain JS, no build)
 ├── locale/             # display metadata (en/zh)
 ├── icon.svg
+├── market/index.json   # self-hosted plugin market index (format 1, pins a commit)
 ├── docs/images/        # README screenshots
 ├── test/               # render smoke test + real-data geometry diagnosis
 └── .github/workflows/  # CI: syntax checks + smoke test

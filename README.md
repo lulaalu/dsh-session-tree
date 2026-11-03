@@ -77,14 +77,13 @@ Session Tree 把「会话 → 每一轮对话 → 分叉」画成一张地图，
 dsh --version
 ```
 
+> 同名项目很多：认准仓库 `lulaalu/dsh-session-tree`。npm 上不带 scope 的 `dsh-session-tree` 属于另一个项目，**不要**用 `dsh plugin add dsh-session-tree` 安装它。
+
 ### 方式 A：从 GitHub 安装（推荐）
 
 ```powershell
-# 固定到标签（当前发布版本）
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.0
-
-# 或固定到具体提交，最严格
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#dbc85c5
+# 固定到发布标签
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.1
 ```
 
 桌面 App 用 `--profile desktop`。也可以在 DSH 的插件页面（或让 Agent 调 `plugin_manager`）用包 spec 安装：
@@ -93,7 +92,24 @@ dsh plugin --profile web add github:lulaalu/dsh-session-tree#dbc85c5
 plugin_manager install_bundle target="github:lulaalu/dsh-session-tree"
 ```
 
-### 方式 B：本地目录（开发用）
+### 方式 B：从插件商店安装（自建市场索引源）
+
+插件商店只显示「市场索引源」里的条目。把本项目的索引源加进设置，就能在商店里搜到并一键安装：
+
+1. **设置 → 插件 → 发现 → 索引源**，添加 `https://cdn.jsdelivr.net/gh/lulaalu/dsh-session-tree@main/market/index.json`
+2. 回到发现页搜索「会话树」或 `Session Tree`，直接安装。
+
+这个索引由本项目自己维护（market index format 1），指向本仓库的固定提交，不经过第三方商店。
+
+### 方式 C：npm
+
+```powershell
+dsh plugin --profile web add @lulaalu/dsh-session-tree
+```
+
+包名是 scoped 的 `@lulaalu/dsh-session-tree`；未发布 npm 之前请用方式 A。
+
+### 方式 D：本地目录（开发用）
 
 ```powershell
 dsh plugin --profile web add D:\path\to\dsh-session-tree
@@ -103,17 +119,17 @@ dsh plugin --profile web add D:\path\to\dsh-session-tree
 
 这是 pnpm 的 `link:` 安装：**不复制文件**，profile 里只登记一个目录联接。改代码后需要让 Host 重新读取 bundle（禁用/启用插件行）并刷新页面。
 
-### 方式 C：tarball
+### 方式 E：tarball
 
 ```powershell
 pnpm pack
-dsh plugin --profile web add .\dsh-session-tree-0.1.0.tgz
+dsh plugin --profile web add .\lulaalu-dsh-session-tree-0.1.1.tgz
 ```
 
 ### 卸载
 
 ```powershell
-dsh plugin --profile web remove dsh-session-tree
+dsh plugin --profile web remove @lulaalu/dsh-session-tree
 ```
 
 ### 装完找不到入口？
@@ -201,6 +217,7 @@ plugin_manager set_plugin target="include:session-tree" enabled=true
 ├── locale/en.json      # 插件显示元数据（英文）
 ├── locale/zh.json      # 插件显示元数据（中文）
 ├── icon.svg            # 插件图标
+├── market/index.json   # 自建插件市场索引（format 1，指向固定提交）
 ├── docs/images/        # README 截图
 ├── test/               # 冒烟测试 + 真实数据几何诊断
 └── .github/workflows/  # CI：语法检查 + 冒烟测试

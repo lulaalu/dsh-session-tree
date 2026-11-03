@@ -14,8 +14,7 @@
 
 > 这是一个 DSH 插件（bundle）。它不修改 session 格式、不复制会话内容、不额外存储对话；只读取 DSH 已有的会话投影来画图。
 
-<!-- 截图占位：拍一张「会话树」面板的截图放到 docs/images/screenshot.png，然后取消下面这行注释 -->
-<!-- ![会话树面板](docs/images/screenshot.png) -->
+![会话树总览：同一工作区的会话、每一轮对话和分叉关系](docs/images/session-tree-overview.png)
 
 ## 为什么做它
 
@@ -44,6 +43,8 @@ Session Tree 把「会话 → 每一轮对话 → 分叉」画成一张地图，
 | 节点操作 | 行内「⋯」菜单：重命名、置顶 / 取消置顶、分叉会话、归档 / 取消归档、复制 Session ID。 |
 | 点击定位 | 点任意节点：打开该会话并自动翻页/滚动定位到那一轮，闪一下高亮。 |
 | 空行压缩 | 分叉出来但还没产生自己对话的会话，压缩成一条窄行，不浪费纵向空间。 |
+
+![隐藏中间会话：分支线用虚线连回最近的可见祖先，子会话就地淡显继承历史](docs/images/session-tree-hidden-middle.png)
 
 ## 安装
 
@@ -169,6 +170,7 @@ plugin_manager set_plugin target="include:session-tree" enabled=true
 ├── locale/en.json      # 插件显示元数据（英文）
 ├── locale/zh.json      # 插件显示元数据（中文）
 ├── icon.svg            # 插件图标
+├── docs/images/        # README 截图
 ├── test/               # 冒烟测试 + 真实数据几何诊断
 └── .github/workflows/  # CI：语法检查 + 冒烟测试
 ```

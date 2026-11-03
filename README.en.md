@@ -13,6 +13,8 @@
 
 > A DeepSeek Harness bundle. It never changes the session format, copies conversations, or stores extra chat data; it only reads the session projections DSH already computes.
 
+![Session Tree overview: sessions as rows, turns as nodes, forks drawn from the turn they were cut from](docs/images/session-tree-overview.png)
+
 ## Why
 
 When you branch off mid-conversation, DSH's session list stays linear: forks get buried, it is hard to see which turn a branch came from, and the original main line gets lost. Session Tree draws sessions, turns and forks as one browsable map.
@@ -34,6 +36,8 @@ When you branch off mid-conversation, DSH's session list stays linear: forks get
 | Row menu | Rename, pin/unpin, fork session, archive/unarchive, copy Session ID — the same operations as the sidebar's row menu. |
 | Click to locate | Clicking a node opens the session, pages the history to that turn and flashes it. |
 | Compact empty rows | Forks that never got their own turn collapse to a slim row. |
+
+![Hidden middle session: the branch line reconnects to the nearest visible ancestor with a dashed link and the sub-session shows its inherited history inline](docs/images/session-tree-hidden-middle.png)
 
 ## Install
 
@@ -134,6 +138,7 @@ Local iteration loop: edit, disable and re-enable the `include:session-tree` plu
 ├── client.js           # entire Web client UI (plain JS, no build)
 ├── locale/             # display metadata (en/zh)
 ├── icon.svg
+├── docs/images/        # README screenshots
 ├── test/               # render smoke test + real-data geometry diagnosis
 └── .github/workflows/  # CI: syntax checks + smoke test
 ```

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Tree",
+    "description": "A per-workspace map of sessions and turns: every session is a lane, every turn a node, and a fork draws a branch from the exact turn it was cut from."
+  }
+}

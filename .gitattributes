@@ -1,0 +1,8 @@
+# Normalize text files to LF so the plain-JS bundle behaves the same on every OS.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary

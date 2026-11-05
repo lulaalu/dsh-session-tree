@@ -300,12 +300,20 @@ renderScenario('exact inheritance count wins over ambiguity', makeAmbiguousColli
   counts: { 'st-card': 3 },
 });
 renderScenario('merged node spans its turns', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[1, 3]] } }, {
-  has: ['st-merge', 'st-merge-count', 'MERGEW:608px', 'MERGEH:100px'],
+  has: ['st-merge', 'st-merge-count', 'MERGEW:200px', 'MERGEH:96px', 'CARDLEFT:430px'],
+  absent: ['CARDLEFT:224px'],
   counts: { 'st-card': 5, 'st-link': 3 },
 });
 renderScenario('fully merged row keeps no inner links', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[0, 4]] } }, {
   has: ['st-merge'],
   counts: { 'st-card': 3, 'st-link': 1, 'st-merge': 1 },
+});
+renderScenario('merged parent with inherited view', makeSessions(['s1', 's2']), workspace, { 0: true, 16: { s1: [[1, 3]] } }, {
+  has: ['st-card', 'st-merge'],
+});
+renderScenario('merge clipped to visible inherited range', makeSessions(['s1', 's2']), workspace, { 16: { s2: [[2, 4]] } }, {
+  has: ['st-merge'],
+  counts: { 'st-card': 6, 'st-merge': 1 },
 });
 renderScenario('select mode toolbar', makeSessions(['s1', 's2']), workspace, { 14: true, 15: { sessionId: 's1', anchor: 1, focus: 3 } }, {
   has: ['st-toolbar', 'st-toolbar-primary', 'data-selectable', 'data-selected'],

@@ -22,15 +22,17 @@ window.__ModuleLoader__.load({
 		const STEP = COL_W + COL_GAP;
 		const TRACK_INSET = 18;
 		const CONTENT_PAD_RIGHT = 56;
-		/** A merged display node is slightly taller and wider than a plain turn card. */
-		const MERGE_CARD_H = CARD_H + 16;
+		/** A merged display node is only slightly larger than one turn card, and takes one column. */
+		const MERGE_CARD_H = CARD_H + 12;
 		const MERGE_ROW_EXTRA = MERGE_CARD_H - CARD_H;
-		const MERGE_BLEED = 8;
+		const MERGE_W_EXTRA = 20;
+		const MERGE_W_BLEED = MERGE_W_EXTRA / 2;
 		/** Vertical bounds of a row's node area: a turn card, or a chained sub-agent mini node. */
 		const rowCardTop = (row) => (row.mini === true ? MINI_TOP : (row.cardTop === undefined ? CARD_TOP : row.cardTop));
 		const rowNodeTop = (row) => row.top + rowCardTop(row);
 		const rowNodeBottom = (row) => row.top + rowCardTop(row) + (row.mini === true ? MINI_H : CARD_H);
-		const rowMergedTop = (row) => row.top + (row.mergedTop === undefined ? (row.height - MERGE_CARD_H) / 2 : row.mergedTop);
+		/** Visual column of one turn index after merged ranges collapse into single columns. */
+		const rowColumnOf = (row, index) => row.colOffset + (row.colOf === undefined ? index : (row.colOf[index] === undefined ? index : row.colOf[index]));
 		const EMPTY_WORKSPACES = { items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null };
 		/** Label column width survives panel switches (module-scoped, not persisted). */
 		let labelWidthStored = LABEL_W;
@@ -559,6 +561,49 @@ window.__ModuleLoader__.load({
 			const rows = [];
 			const rowBySession = new Map();
 			const seen = new Set();
+			const mergeTable = options.merges === undefined || options.merges === null ? {} : options.merges;
+			const rangesOf = (sessionId) => {
+				const ranges = mergeTable[sessionId];
+				return Array.isArray(ranges) ? ranges : [];
+			};
+			/**
+			 * Map turn indices to visual columns. A merged range collapses into one column
+			 * and every later turn shifts left, so merging really frees horizontal space
+			 * instead of just drawing a wider block.
+			 */
+			const buildColumns = (turns, ranges) => {
+				const count = turns.length;
+				const cols = new Array(count);
+				for (let index = 0; index < count; index += 1) cols[index] = index;
+				if (ranges.length === 0 || count === 0) return cols;
+				const sorted = ranges
+					.filter((range) => Array.isArray(range) && range[0] < range[1])
+					.slice()
+					.sort((left, right) => left[0] - right[0]);
+				let cursor = 0;
+				let shift = 0;
+				for (const range of sorted) {
+					const start = Math.max(0, range[0]);
+					const end = Math.min(count - 1, range[1]);
+					if (end < start) continue;
+					while (cursor < start && cursor < count) {
+						cols[cursor] = cursor - shift;
+						cursor += 1;
+					}
+					if (cursor < start) continue;
+					const column = start - shift;
+					while (cursor <= end && cursor < count) {
+						cols[cursor] = column;
+						cursor += 1;
+					}
+					shift += end - start;
+				}
+				while (cursor < count) {
+					cols[cursor] = cursor - shift;
+					cursor += 1;
+				}
+				return cols;
+			};
 			// Exact prefix lengths come from the Host route (`inheritedEventCount`). Without
 			// them, fall back to aligning turn content against the parent, because raw seqs
 			// are only unique inside one Session log: a child's own first turn can reuse the
@@ -585,6 +630,7 @@ window.__ModuleLoader__.load({
 					? (effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent))
 					: exactInherited;
 				const inherited = exactInherited === undefined ? Math.max(directInherited, effectiveInherited) : exactInherited;
+				const rowCols = buildColumns(turns, rangesOf(session.id));
 				const parentRowForOffset = effectiveParent === undefined ? undefined : rowBySession.get(effectiveParent.id);
 				const isSubagent = session.origin === 'subagent';
 				if (isSubagent && options.showSubagents !== true) {
@@ -614,7 +660,7 @@ window.__ModuleLoader__.load({
 						? 0
 						: (parentRowForOffset.mini === true
 							? parentRowForOffset.spawnColAbs
-							: parentRowForOffset.colOffset + Math.min(Math.max(spawnIndex, parentRowForOffset.visibleFrom), parentRowForOffset.visibleTo));
+							: rowColumnOf(parentRowForOffset, Math.min(Math.max(spawnIndex, parentRowForOffset.visibleFrom), parentRowForOffset.visibleTo)));
 					const miniRow = {
 						session: session,
 						depth: depth,
@@ -640,7 +686,25 @@ window.__ModuleLoader__.load({
 					return;
 				}
 				const freshSpawn = false;
-				const colOffset = parentRowForOffset === undefined ? 0 : parentRowForOffset.colOffset;
+				const inheritedCount = effectiveParent === undefined ? 0 : Math.min(effectiveInherited, turns.length);
+				let colOffset = 0;
+				if (parentRowForOffset !== undefined) {
+					if (parentRowForOffset.mini === true) {
+						const anchorIndex = Math.max(0, inheritedCount - 1);
+						colOffset = parentRowForOffset.spawnColAbs - (rowCols[anchorIndex] === undefined ? 0 : rowCols[anchorIndex]);
+					} else if (inheritedCount > 0) {
+						const parentCol = rowColumnOf(parentRowForOffset, Math.min(inheritedCount - 1, parentRowForOffset.turns.length - 1));
+						const ownCol = rowCols[inheritedCount - 1] === undefined ? 0 : rowCols[inheritedCount - 1];
+						colOffset = parentCol - ownCol;
+					} else {
+						colOffset = parentRowForOffset.colOffset;
+					}
+				}
+				const visibleFrom = options.showInherited || effectiveParent === undefined ? 0 : effectiveInherited;
+				// Never let a shifted row start left of column 0 (possible when the parent
+				// compacted columns and this row shows its inherited prefix as well).
+				const firstRelative = rowCols[visibleFrom] === undefined ? visibleFrom : rowCols[visibleFrom];
+				if (colOffset + firstRelative < 0) colOffset = -firstRelative;
 				const row = {
 					session: session,
 					depth: depth,
@@ -650,9 +714,10 @@ window.__ModuleLoader__.load({
 					inherited: inherited,
 					hiddenGap: effectiveParent !== undefined && directParent !== undefined && directParent.id !== effectiveParent.id,
 					forkCol: effectiveParent === undefined ? -1 : effectiveInherited - 1,
-					visibleFrom: options.showInherited || effectiveParent === undefined ? 0 : effectiveInherited,
+					visibleFrom: visibleFrom,
 					visibleTo: turns.length - 1,
 					colOffset: colOffset,
+					colOf: rowCols,
 					freshSpawn: freshSpawn,
 					parentRowIndex: -1,
 					subagent: false,
@@ -675,7 +740,6 @@ window.__ModuleLoader__.load({
 			// A row whose every turn is inherited has no node of its own: collapse it to a
 			// slim row so forks that were never continued stop wasting vertical space.
 			// Sub-agent rows are always slim and carry exactly one chained mini node.
-			const mergeTable = options.merges === undefined || options.merges === null ? {} : options.merges;
 			const rowHasMerge = (row) => {
 				if (row.mini === true || row.visibleTo < row.visibleFrom) return false;
 				const ranges = mergeTable[row.session.id];
@@ -696,8 +760,8 @@ window.__ModuleLoader__.load({
 				row.cardTop = row.mini === true ? MINI_TOP : (row.height - CARD_H) / 2;
 				row.mergedTop = (row.height - MERGE_CARD_H) / 2;
 				row.top = cursorTop;
-				row.fromAbs = row.mini === true ? row.spawnColAbs : row.colOffset + row.visibleFrom;
-				row.toAbs = row.mini === true ? row.spawnColAbs : row.colOffset + row.visibleTo;
+				row.fromAbs = row.mini === true ? row.spawnColAbs : rowColumnOf(row, row.visibleFrom);
+				row.toAbs = row.mini === true ? row.spawnColAbs : rowColumnOf(row, Math.max(row.visibleFrom, row.visibleTo));
 				cursorTop += row.height + ROW_GAP;
 			}
 			const gridHeight = rows.length === 0 ? 0 : rows[rows.length - 1].top + rows[rows.length - 1].height;
@@ -740,12 +804,13 @@ window.__ModuleLoader__.load({
 				if (row.forkCol < 0) continue;
 				const toIndex = options.showInherited && row.forkCol >= 0 ? row.forkCol : row.visibleFrom;
 				if (toIndex < 0) continue;
-				const fromCol = parentRow.colOffset + Math.max(row.forkCol, parentRow.visibleFrom);
+				const parentForkIndex = Math.min(Math.max(row.forkCol, parentRow.visibleFrom), parentRow.visibleTo);
+				const fromCol = rowColumnOf(parentRow, parentForkIndex);
 				edges.push({
 					fromRow: row.parentRowIndex,
 					fromCol: fromCol,
 					toRow: index,
-					toCol: row.colOffset + toIndex,
+					toCol: rowColumnOf(row, toIndex),
 					gap: row.hiddenGap,
 					kind: 'fork',
 				});
@@ -938,8 +1003,8 @@ window.__ModuleLoader__.load({
 			const last = turns[turns.length - 1];
 			const prompt = String((first && first.prompt) || '').trim();
 			const response = String((last && last.response) || '').trim();
-			const left = TRACK_INSET + props.col * STEP - MERGE_BLEED;
-			const width = count * STEP - COL_GAP + MERGE_BLEED * 2;
+			const left = TRACK_INSET + props.col * STEP - MERGE_W_BLEED;
+			const width = COL_W + MERGE_W_EXTRA;
 			const top = props.top === undefined ? CARD_TOP : props.top;
 			const height = props.height === undefined ? MERGE_CARD_H : props.height;
 			const title = turns.map((turn) => '#' + turn.turn + ': ' + String(turn.prompt || '').trim()).join('\n');
@@ -997,22 +1062,20 @@ window.__ModuleLoader__.load({
 			const spans = props.spans;
 			const paths = [];
 			const spanAt = (rowIndex, col) => {
-				const row = rows[rowIndex];
 				const rowSpans = spans === undefined ? undefined : spans[rowIndex];
 				if (rowSpans === undefined) return undefined;
-				const relative = col - (row.colOffset === undefined ? 0 : row.colOffset);
 				for (const span of rowSpans) {
-					if (span.from !== span.to && relative >= span.from && relative <= span.to) return span;
+					if (col >= span.from && col <= span.to) return span;
 				}
 				return undefined;
 			};
 			const anchorBottom = (rowIndex, col) => {
-				const row = rows[rowIndex];
-				return spanAt(rowIndex, col) === undefined ? rowNodeBottom(row) : rowMergedTop(row) + MERGE_CARD_H;
+				const span = spanAt(rowIndex, col);
+				return span === undefined ? rowNodeBottom(rows[rowIndex]) : span.bottom;
 			};
 			const anchorTop = (rowIndex, col) => {
-				const row = rows[rowIndex];
-				return spanAt(rowIndex, col) === undefined ? rowNodeTop(row) : rowMergedTop(row);
+				const span = spanAt(rowIndex, col);
+				return span === undefined ? rowNodeTop(rows[rowIndex]) : span.top;
 			};
 			if (props.links !== false) {
 				for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
@@ -1020,14 +1083,13 @@ window.__ModuleLoader__.load({
 					if (row.mini === true) continue;
 					if (row.visibleTo <= row.visibleFrom) continue;
 					const y = row.top + row.height / 2;
-					const base = row.colOffset === undefined ? 0 : row.colOffset;
-					const rowSpans = spans === undefined || spans[rowIndex] === undefined ? null : spans[rowIndex];
-					if (rowSpans !== null) {
+					const rowSpans = spans === undefined ? undefined : spans[rowIndex];
+					if (rowSpans !== undefined) {
 						for (let spanIndex = 0; spanIndex + 1 < rowSpans.length; spanIndex += 1) {
 							const leftSpan = rowSpans[spanIndex];
 							const rightSpan = rowSpans[spanIndex + 1];
-							const x1 = TRACK_INSET + (base + leftSpan.to) * STEP + COL_W - 3;
-							const x2 = TRACK_INSET + (base + rightSpan.from) * STEP + 3;
+							const x1 = leftSpan.right - 3;
+							const x2 = rightSpan.left + 3;
 							paths.push(h('path', {
 								key: 'link-' + rowIndex + '-span-' + spanIndex,
 								className: 'st-link',
@@ -1035,15 +1097,6 @@ window.__ModuleLoader__.load({
 							}));
 						}
 						continue;
-					}
-					for (let col = row.visibleFrom; col < row.visibleTo; col += 1) {
-						const x1 = TRACK_INSET + (base + col) * STEP + COL_W - 3;
-						const x2 = TRACK_INSET + (base + col + 1) * STEP + 3;
-						paths.push(h('path', {
-							key: 'link-' + rowIndex + '-' + col,
-							className: 'st-link',
-							d: 'M' + x1 + ' ' + y + 'L' + x2 + ' ' + y,
-						}));
 					}
 				}
 			}
@@ -1293,10 +1346,42 @@ window.__ModuleLoader__.load({
 					)),
 				[activeGroup, showInherited, showSubagents, exactInheritance, merges, sessionsState, archivedSet],
 			);
-			const linkSpans = useMemo(
+			// Pixel geometry of every row's displayed nodes (turn cards and merged blocks),
+			// used for the horizontal turn links and for edge anchors. Merged ranges take a
+			// single column, so later nodes really shift left.
+			const unitGeometry = useMemo(
 				() => (layout === null
 					? []
-					: layout.rows.map((row) => rowUnits(row).map((unit) => (unit.kind === 'merge' ? { from: unit.from, to: unit.to } : { from: unit.index, to: unit.index })))),
+					: layout.rows.map((row) => {
+						if (row.mini === true || row.visibleTo < row.visibleFrom) return [];
+						const geometry = [];
+						for (const unit of rowUnits(row)) {
+							const turnIndex = unit.kind === 'merge' ? unit.from : unit.index;
+							const column = rowColumnOf(row, turnIndex);
+							if (unit.kind === 'merge') {
+								const left = TRACK_INSET + column * STEP - MERGE_W_BLEED;
+								geometry.push({
+									from: column,
+									to: column,
+									left: left,
+									right: left + COL_W + MERGE_W_EXTRA,
+									top: row.top + row.mergedTop,
+									bottom: row.top + row.mergedTop + MERGE_CARD_H,
+								});
+								continue;
+							}
+							const left = TRACK_INSET + column * STEP;
+							geometry.push({
+								from: column,
+								to: column,
+								left: left,
+								right: left + COL_W,
+								top: row.top + row.cardTop,
+								bottom: row.top + row.cardTop + CARD_H,
+							});
+						}
+						return geometry;
+					})),
 				[layout, merges],
 			);
 
@@ -1815,7 +1900,7 @@ window.__ModuleLoader__.load({
 									turns: mergedTurns,
 									from: unit.from,
 									to: unit.to,
-									col: row.colOffset + unit.from,
+									col: rowColumnOf(row, unit.from),
 									top: row.mergedTop,
 									height: MERGE_CARD_H,
 									inherited: unit.from < row.inherited,
@@ -1839,7 +1924,7 @@ window.__ModuleLoader__.load({
 							h(TurnCard, {
 								key: session.id + '-turn-' + turnIndex,
 								turn: turn,
-								col: row.colOffset + turnIndex,
+								col: rowColumnOf(row, turnIndex),
 								top: row.cardTop,
 								inherited: turnIndex < row.inherited,
 								running: session.running === true && turnIndex === row.visibleTo,
@@ -1930,7 +2015,7 @@ window.__ModuleLoader__.load({
 							key: 'edges',
 							rows: layout.rows,
 							edges: layout.edges,
-							spans: linkSpans,
+							spans: unitGeometry,
 							links: showLinks,
 							separators: showRowSeps,
 							separatorY: layout.separators,

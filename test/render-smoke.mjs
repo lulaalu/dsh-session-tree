@@ -17,7 +17,7 @@ const fakeElement = () => ({
   appendChild: noop,
   textContent: '',
 });
-globalThis.window = { __ModuleLoader__: { load: (m) => { globalThis.__pluginModule = m; } } };
+globalThis.window = { __ModuleLoader__: { load: (m) => { globalThis.__pluginModule = m; } }, __SESSION_TREE_TEST__: true };
 globalThis.document = {
   querySelector: () => null,
   createElement: fakeElement,
@@ -304,6 +304,14 @@ renderScenario('merged node spans its turns', makeSessions(['s1', 's2']), worksp
   absent: ['CARDLEFT:224px'],
   counts: { 'st-card': 5, 'st-link': 3 },
 });
+renderScenario('two neighbouring merges stay two nodes', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[1, 2], [3, 4]] } }, {
+  has: ['st-merge'],
+  counts: { 'st-card': 5, 'st-merge': 2 },
+});
+renderScenario('two separate merges stay two nodes', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[0, 1], [3, 4]] } }, {
+  has: ['st-merge'],
+  counts: { 'st-card': 5, 'st-merge': 2 },
+});
 renderScenario('fully merged row keeps no inner links', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[0, 4]] } }, {
   has: ['st-merge'],
   counts: { 'st-card': 3, 'st-link': 1, 'st-merge': 1 },
@@ -386,3 +394,25 @@ renderScenario('archive dialog', makeSessions(['s1', 's2']), workspace, { 11: { 
 renderScenario('inherited shown', makeSessions(['s1', 's2']), workspace, { 0: true }, { has: ['st-card'] });
 renderScenario('empty list', { ids: [], byId: {} }, { items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null }, undefined, { has: ['st-empty'] });
 renderScenario('missing projections', { ids: ['s9'], byId: { s9: { id: 's9', displayTitle: 'no turns', cwd: 'D:\\proj', running: false, blank: false, updatedAt: Date.now() } } }, workspace, undefined, { has: ['st-label'] });
+
+// ---- pure merge-range normalization --------------------------------------
+const internals = globalThis.window.__sessionTreeInternals;
+function checkRanges(label, actual, expected) {
+  const got = JSON.stringify(actual);
+  const want = JSON.stringify(expected);
+  if (got !== want) {
+    console.log('FAIL ' + label + ' -> ' + got + ', expected ' + want);
+    process.exitCode = 1;
+    return;
+  }
+  console.log('OK   ' + label);
+}
+if (internals === undefined) {
+  console.log('FAIL merge internals were not exposed');
+  process.exitCode = 1;
+} else {
+  checkRanges('ranges keep neighbouring merges apart', internals.normalizeRanges([[1, 2], [3, 4]]), [[1, 2], [3, 4]]);
+  checkRanges('ranges combine overlapping merges', internals.normalizeRanges([[1, 3], [2, 4]]), [[1, 4]]);
+  checkRanges('ranges combine merges that share a turn', internals.normalizeRanges([[1, 2], [2, 4]]), [[1, 4]]);
+  checkRanges('ranges sort unordered input', internals.normalizeRanges([[3, 4], [0, 1]]), [[0, 1], [3, 4]]);
+}

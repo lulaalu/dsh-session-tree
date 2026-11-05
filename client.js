@@ -92,11 +92,17 @@ window.__ModuleLoader__.load({
 			const merged = [];
 			for (const range of sorted) {
 				const last = merged[merged.length - 1];
-				if (last !== undefined && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1]);
+				// Only overlapping ranges combine: two separately merged neighbouring blocks
+				// must stay two nodes, otherwise the second merge looks like it vanished.
+				if (last !== undefined && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
 				else merged.push([range[0], range[1]]);
 			}
 			return merged;
 		};
+		// Test-only seam: the smoke test drives pure helpers without a browser.
+		if (typeof window !== 'undefined' && window.__SESSION_TREE_TEST__ === true) {
+			window.__sessionTreeInternals = { normalizeRanges: normalizeRanges };
+		}
 		/**
 		 * Exact fork-inherited turn counts per Session, fetched once per page load from
 		 * the Host route. Raw turn seqs are only unique inside one Session log, so the

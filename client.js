@@ -127,6 +127,8 @@ window.__ModuleLoader__.load({
 			'.st-toggle:hover{background:color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);color:var(--dsw-alias-label-primary)}',
 			'.st-toggle[data-on="true"]{border-color:var(--st-accent);color:var(--st-accent);background:color-mix(in srgb, var(--st-accent) 12%, transparent)}',
 			'.st-toggle-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.7}',
+			'.st-toggle[data-tip]{position:relative}',
+			'.st-toggle[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 8px);right:0;z-index:80;box-sizing:border-box;max-width:320px;padding:6px 9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px;white-space:normal;text-align:left;box-shadow:0 6px 18px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);pointer-events:none}',
 			'.st-hint{flex:none;padding:0 24px 10px;font-size:11px;color:var(--dsw-alias-label-secondary)}',
 			'.st-error{flex:none;margin:0 24px 8px;padding:6px 10px;border-radius:6px;font-size:12px;color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent)}',
 			'.st-body{flex:1;min-height:0;overflow:auto;position:relative;padding:4px 0 32px;isolation:isolate}',
@@ -306,8 +308,10 @@ window.__ModuleLoader__.load({
 			'error.action': '操作失败：{code}',
 			'error.archiveActive': '会话仍在运行，请先停止再归档',
 			'toggle.select': '选择节点',
-			'toggle.selectHint': '选择连续节点后可以合并为一个显示节点',
+			'toggle.selectHint': '选择连续节点后可以合并为一个显示节点（也可以按住 Ctrl 临时选择）',
+			'toggle.selectTip': '按住 Ctrl 临时进入选择模式，松开退出；Ctrl+Shift 点击选择范围',
 			'select.hint': '点击节点开始选择，Shift 点击选择范围',
+			'select.autoHint': '按住 Ctrl：点击节点选择，Ctrl+Shift 点击选择范围',
 			'select.count': '已选 {count} 个节点',
 			'select.merge': '合并',
 			'select.exit': '退出选择',
@@ -375,8 +379,10 @@ window.__ModuleLoader__.load({
 			'error.action': 'Action failed: {code}',
 			'error.archiveActive': 'Session is still running; stop it before archiving',
 			'toggle.select': 'Select nodes',
-			'toggle.selectHint': 'Select a contiguous range of turns and merge them into one displayed node',
+			'toggle.selectHint': 'Merge a contiguous range of turns into one displayed node (hold Ctrl for a temporary mode)',
+			'toggle.selectTip': 'Hold Ctrl to enter select mode temporarily and release to leave; Ctrl+Shift-click selects a range',
 			'select.hint': 'Click a node to start selecting; Shift-click to extend the range',
+			'select.autoHint': 'Hold Ctrl: click nodes to select, Ctrl+Shift-click for a range',
 			'select.count': '{count} nodes selected',
 			'select.merge': 'Merge',
 			'select.exit': 'Done',
@@ -916,16 +922,20 @@ window.__ModuleLoader__.load({
 		}
 
 		function Toggle(props) {
+			const hasTip = props.tip !== undefined && props.tip !== null && props.tip !== '';
+			const attrs = {
+				type: 'button',
+				className: 'st-toggle',
+				'data-on': props.on ? 'true' : 'false',
+				'aria-pressed': props.on ? 'true' : 'false',
+				onClick: props.onToggle,
+				// A custom tooltip replaces the native one so the hint is not shown twice.
+				title: hasTip ? undefined : (props.hint || props.label),
+			};
+			if (hasTip) attrs['data-tip'] = props.tip;
 			return h(
 				'button',
-				{
-					type: 'button',
-					className: 'st-toggle',
-					'data-on': props.on ? 'true' : 'false',
-					'aria-pressed': props.on ? 'true' : 'false',
-					onClick: props.onToggle,
-					title: props.hint || props.label,
-				},
+				attrs,
 				props.on ? h('span', { className: 'st-toggle-dot', 'aria-hidden': true }) : null,
 				props.label,
 			);
@@ -1289,6 +1299,7 @@ window.__ModuleLoader__.load({
 			const [showRowSeps, setShowRowSeps] = useState(false);
 			const [exactInheritance, setExactInheritance] = useState(exactInheritanceStored);
 			const [selectMode, setSelectMode] = useState(false);
+			const [autoSelect, setAutoSelect] = useState(false);
 			const [selection, setSelection] = useState(null);
 			const [merges, setMerges] = useState(mergesStored);
 			const [panning, setPanning] = useState(false);
@@ -1296,6 +1307,12 @@ window.__ModuleLoader__.load({
 			const bodyRef = useRef(null);
 			const panRef = useRef(null);
 			const panStopRef = useRef(null);
+			const selectModeRef = useRef(false);
+			const autoSelectRef = useRef(false);
+			const dialogRef = useRef(null);
+			selectModeRef.current = selectMode;
+			autoSelectRef.current = autoSelect;
+			dialogRef.current = dialog;
 			const requested = useRef({});
 			const dragRef = useRef(false);
 			const rootRef = useRef(null);
@@ -1478,6 +1495,47 @@ window.__ModuleLoader__.load({
 					panStopRef.current();
 					panStopRef.current = null;
 				}
+			}, []);
+
+			// Ctrl is a transient shortcut for select mode: hold to select (Ctrl+click
+			// toggles a node, Ctrl+Shift+click extends). Releasing keeps the current
+			// selection so the merge toolbar stays actionable; the header toggle is the
+			// sticky alternative.
+			useEffect(() => {
+				if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined;
+				const editing = () => {
+					if (typeof document === 'undefined' || document.activeElement === null || document.activeElement === undefined) return false;
+					const tag = String(document.activeElement.tagName || '');
+					return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+				};
+				const down = (event) => {
+					const key = event.key;
+					if (key !== 'Control' && key !== 'Ctrl') return;
+					if (dialogRef.current !== null || editing() === true) return;
+					if (selectModeRef.current === true) return;
+					autoSelectRef.current = true;
+					setAutoSelect(true);
+					setSelectMode(true);
+				};
+				const leave = () => {
+					if (autoSelectRef.current !== true) return;
+					autoSelectRef.current = false;
+					setAutoSelect(false);
+					setSelectMode(false);
+				};
+				const up = (event) => {
+					const key = event.key;
+					if (key !== 'Control' && key !== 'Ctrl') return;
+					leave();
+				};
+				window.addEventListener('keydown', down);
+				window.addEventListener('keyup', up);
+				window.addEventListener('blur', leave);
+				return () => {
+					window.removeEventListener('keydown', down);
+					window.removeEventListener('keyup', up);
+					window.removeEventListener('blur', leave);
+				};
 			}, []);
 
 			/** Drag the canvas itself: the tree scrolls horizontally/vertically like a map. */
@@ -1713,6 +1771,8 @@ window.__ModuleLoader__.load({
 				persistMerges(next);
 				setMerges(next);
 				setSelection(null);
+				autoSelectRef.current = false;
+				setAutoSelect(false);
 				setSelectMode(false);
 			};
 			const splitMerge = (sessionId, from, to) => {
@@ -1725,6 +1785,8 @@ window.__ModuleLoader__.load({
 				setMerges(next);
 			};
 			const exitSelect = () => {
+				autoSelectRef.current = false;
+				setAutoSelect(false);
 				setSelection(null);
 				setSelectMode(false);
 			};
@@ -1982,12 +2044,18 @@ window.__ModuleLoader__.load({
 			});
 
 			const selectionCount = selectionRange === null ? 0 : selectionRange.to - selectionRange.from + 1;
-			const toolbarView = selectMode !== true
+			const toolbarView = selectMode !== true && selectionRange === null
 				? null
 				: h(
 					'div',
 					{ className: 'st-toolbar', role: 'toolbar', 'aria-label': tr('toggle.select') },
-					h('span', { className: 'st-toolbar-text' }, selectionCount > 1 ? formatTemplate(tr('select.count'), { count: selectionCount }) : tr('select.hint')),
+					h(
+						'span',
+						{ className: 'st-toolbar-text' },
+						selectionCount > 0
+							? formatTemplate(tr('select.count'), { count: selectionCount })
+							: (autoSelect === true ? tr('select.autoHint') : tr('select.hint')),
+					),
 					selectionCount > 1
 						? h(
 							'button',
@@ -2108,6 +2176,7 @@ window.__ModuleLoader__.load({
 						h(Toggle, {
 							label: tr('toggle.select'),
 							hint: tr('toggle.selectHint'),
+							tip: tr('toggle.selectTip'),
 							on: selectMode,
 							onToggle: () => {
 								if (selectMode) exitSelect();

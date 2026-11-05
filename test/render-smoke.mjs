@@ -17,7 +17,12 @@ const fakeElement = () => ({
   appendChild: noop,
   textContent: '',
 });
-globalThis.window = { __ModuleLoader__: { load: (m) => { globalThis.__pluginModule = m; } }, __SESSION_TREE_TEST__: true };
+globalThis.window = {
+  __ModuleLoader__: { load: (m) => { globalThis.__pluginModule = m; } },
+  __SESSION_TREE_TEST__: true,
+  addEventListener: noop,
+  removeEventListener: noop,
+};
 globalThis.document = {
   querySelector: () => null,
   createElement: fakeElement,
@@ -101,6 +106,7 @@ function makeFakeReact() {
       if (props['data-mini'] === 'true') React.seen.push('data-mini');
       if (props['data-selected'] === 'true') React.seen.push('data-selected');
       if (props['data-selectable'] === 'true') React.seen.push('data-selectable');
+      if (typeof props['data-tip'] === 'string') React.seen.push('data-tip');
       if (props.children !== undefined) renderNode(props.children);
     }
   };
@@ -299,31 +305,31 @@ renderScenario('exact inheritance count wins over ambiguity', makeAmbiguousColli
   absent: ['data-compact'],
   counts: { 'st-card': 3 },
 });
-renderScenario('merged node spans its turns', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[1, 3]] } }, {
+renderScenario('merged node spans its turns', makeSessions(['s1', 's2']), workspace, { 17: { s1: [[1, 3]] } }, {
   has: ['st-merge', 'st-merge-count', 'MERGEW:200px', 'MERGEH:96px', 'CARDLEFT:430px'],
   absent: ['CARDLEFT:224px'],
   counts: { 'st-card': 5, 'st-link': 3 },
 });
-renderScenario('two neighbouring merges stay two nodes', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[1, 2], [3, 4]] } }, {
+renderScenario('two neighbouring merges stay two nodes', makeSessions(['s1', 's2']), workspace, { 17: { s1: [[1, 2], [3, 4]] } }, {
   has: ['st-merge'],
   counts: { 'st-card': 5, 'st-merge': 2 },
 });
-renderScenario('two separate merges stay two nodes', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[0, 1], [3, 4]] } }, {
+renderScenario('two separate merges stay two nodes', makeSessions(['s1', 's2']), workspace, { 17: { s1: [[0, 1], [3, 4]] } }, {
   has: ['st-merge'],
   counts: { 'st-card': 5, 'st-merge': 2 },
 });
-renderScenario('fully merged row keeps no inner links', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[0, 4]] } }, {
+renderScenario('fully merged row keeps no inner links', makeSessions(['s1', 's2']), workspace, { 17: { s1: [[0, 4]] } }, {
   has: ['st-merge'],
   counts: { 'st-card': 3, 'st-link': 1, 'st-merge': 1 },
 });
-renderScenario('merged parent with inherited view', makeSessions(['s1', 's2']), workspace, { 0: true, 16: { s1: [[1, 3]] } }, {
+renderScenario('merged parent with inherited view', makeSessions(['s1', 's2']), workspace, { 0: true, 17: { s1: [[1, 3]] } }, {
   has: ['st-card', 'st-merge'],
 });
-renderScenario('merge clipped to visible inherited range', makeSessions(['s1', 's2']), workspace, { 16: { s2: [[2, 4]] } }, {
+renderScenario('merge clipped to visible inherited range', makeSessions(['s1', 's2']), workspace, { 17: { s2: [[2, 4]] } }, {
   has: ['st-merge'],
   counts: { 'st-card': 6, 'st-merge': 1 },
 });
-renderScenario('select mode toolbar', makeSessions(['s1', 's2']), workspace, { 14: true, 15: { sessionId: 's1', anchor: 1, focus: 3 } }, {
+renderScenario('select mode toolbar', makeSessions(['s1', 's2']), workspace, { 14: true, 16: { sessionId: 's1', anchor: 1, focus: 3 } }, {
   has: ['st-toolbar', 'st-toolbar-primary', 'data-selectable', 'data-selected'],
   counts: { 'st-card': 7 },
 });
@@ -354,7 +360,7 @@ renderScenario('subagent collapsed badge', makeSubagents(), workspace, undefined
 });
 
 renderScenario('normal tree', makeSessions(['s1', 's2']), workspace, undefined, {
-  has: ['st-card', 'st-divider', 'st-label-fork', 'st-edge', 'st-rowsep'],
+  has: ['st-card', 'st-divider', 'st-label-fork', 'st-edge', 'st-rowsep', 'data-tip'],
   counts: { 'st-edge': 1 },
 });
 renderScenario('compact empty fork', makeEmptyFork(), workspace, undefined, {

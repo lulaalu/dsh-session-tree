@@ -90,6 +90,10 @@ function makeFakeReact() {
         if (classes.indexOf('st-mini') >= 0 && props.style !== undefined && typeof props.style.left === 'string') {
           React.seen.push('MINILEFT:' + props.style.left);
         }
+        if (classes.indexOf('st-merge') >= 0 && props.style !== undefined) {
+          React.seen.push('MERGEW:' + props.style.width);
+          React.seen.push('MERGEH:' + props.style.height);
+        }
       }
       if (props['data-archived'] === 'true') React.seen.push('data-archived');
       if (props['data-compact'] === 'true') React.seen.push('data-compact');
@@ -296,7 +300,7 @@ renderScenario('exact inheritance count wins over ambiguity', makeAmbiguousColli
   counts: { 'st-card': 3 },
 });
 renderScenario('merged node spans its turns', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[1, 3]] } }, {
-  has: ['st-merge', 'st-merge-count'],
+  has: ['st-merge', 'st-merge-count', 'MERGEW:608px', 'MERGEH:100px'],
   counts: { 'st-card': 5, 'st-link': 3 },
 });
 renderScenario('fully merged row keeps no inner links', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[0, 4]] } }, {

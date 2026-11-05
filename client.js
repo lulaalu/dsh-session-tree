@@ -22,9 +22,15 @@ window.__ModuleLoader__.load({
 		const STEP = COL_W + COL_GAP;
 		const TRACK_INSET = 18;
 		const CONTENT_PAD_RIGHT = 56;
+		/** A merged display node is slightly taller and wider than a plain turn card. */
+		const MERGE_CARD_H = CARD_H + 16;
+		const MERGE_ROW_EXTRA = MERGE_CARD_H - CARD_H;
+		const MERGE_BLEED = 8;
 		/** Vertical bounds of a row's node area: a turn card, or a chained sub-agent mini node. */
-		const rowNodeTop = (row) => (row.mini === true ? row.top + MINI_TOP : row.top + CARD_TOP);
-		const rowNodeBottom = (row) => (row.mini === true ? row.top + MINI_TOP + MINI_H : row.top + CARD_TOP + CARD_H);
+		const rowCardTop = (row) => (row.mini === true ? MINI_TOP : (row.cardTop === undefined ? CARD_TOP : row.cardTop));
+		const rowNodeTop = (row) => row.top + rowCardTop(row);
+		const rowNodeBottom = (row) => row.top + rowCardTop(row) + (row.mini === true ? MINI_H : CARD_H);
+		const rowMergedTop = (row) => row.top + (row.mergedTop === undefined ? (row.height - MERGE_CARD_H) / 2 : row.mergedTop);
 		const EMPTY_WORKSPACES = { items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null };
 		/** Label column width survives panel switches (module-scoped, not persisted). */
 		let labelWidthStored = LABEL_W;
@@ -178,7 +184,10 @@ window.__ModuleLoader__.load({
 			'.st-body{cursor:grab}',
 			'.st-body[data-panning="true"]{cursor:grabbing;user-select:none}',
 			'.st-card[data-selected="true"]{border-color:var(--st-accent);box-shadow:0 0 0 2px color-mix(in srgb, var(--st-accent) 32%, transparent)}',
-			'.st-merge-count{margin-left:6px;font-size:10px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+			'.st-merge-count{margin-left:auto;display:inline-flex;align-items:center;height:15px;padding:0 7px;border-radius:999px;background:color-mix(in srgb, var(--st-accent) 12%, transparent);color:var(--st-accent);font-size:9.5px;line-height:15px;font-variant-numeric:tabular-nums}',
+			'.st-merge{padding:8px 12px;gap:2px;border-radius:12px;background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 80%, var(--st-accent) 5%);box-shadow:inset 3px 0 0 color-mix(in srgb, var(--st-accent) 55%, transparent)}',
+			'.st-merge .st-card-prompt{-webkit-line-clamp:2;line-height:16px}',
+			'.st-merge .st-card-reply{-webkit-line-clamp:2;line-height:14px}',
 			'.st-merge-split{position:absolute;right:6px;bottom:5px;height:14px;padding:0 6px;border-radius:6px;border:1px solid var(--st-card-border);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font:inherit;font-size:9.5px;line-height:12px;cursor:pointer;opacity:0;transition:opacity .12s}',
 			'.st-merge:hover .st-merge-split,.st-merge-split:focus-visible{opacity:1}',
 			'.st-toolbar{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;border-radius:999px;border:1px solid var(--st-card-border);background:var(--dsw-alias-bg-layer-1);box-shadow:0 4px 16px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);z-index:40}',
@@ -666,11 +675,26 @@ window.__ModuleLoader__.load({
 			// A row whose every turn is inherited has no node of its own: collapse it to a
 			// slim row so forks that were never continued stop wasting vertical space.
 			// Sub-agent rows are always slim and carry exactly one chained mini node.
+			const mergeTable = options.merges === undefined || options.merges === null ? {} : options.merges;
+			const rowHasMerge = (row) => {
+				if (row.mini === true || row.visibleTo < row.visibleFrom) return false;
+				const ranges = mergeTable[row.session.id];
+				if (!Array.isArray(ranges)) return false;
+				for (const range of ranges) {
+					if (range[1] < row.visibleFrom || range[0] > row.visibleTo) continue;
+					return true;
+				}
+				return false;
+			};
 			let cursorTop = 0;
 			for (let index = 0; index < rows.length; index += 1) {
 				const row = rows[index];
 				row.compact = row.mini === true ? false : row.visibleTo < row.visibleFrom;
-				row.height = row.mini === true ? MINI_ROW_H : (row.compact ? COMPACT_ROW_H : ROW_H);
+				row.mergeRow = rowHasMerge(row);
+				const baseHeight = row.mini === true ? MINI_ROW_H : (row.compact ? COMPACT_ROW_H : ROW_H);
+				row.height = row.mergeRow ? baseHeight + MERGE_ROW_EXTRA : baseHeight;
+				row.cardTop = row.mini === true ? MINI_TOP : (row.height - CARD_H) / 2;
+				row.mergedTop = (row.height - MERGE_CARD_H) / 2;
 				row.top = cursorTop;
 				row.fromAbs = row.mini === true ? row.spawnColAbs : row.colOffset + row.visibleFrom;
 				row.toAbs = row.mini === true ? row.spawnColAbs : row.colOffset + row.visibleTo;
@@ -844,6 +868,7 @@ window.__ModuleLoader__.load({
 			const openLabel = formatTemplate(props.tr('node.open'), { turn: turnNumber });
 			const title = (prompt || '#' + turnNumber) + (response ? '\n\n' + response : '');
 			const left = TRACK_INSET + props.col * STEP;
+			const top = props.top === undefined ? CARD_TOP : props.top;
 			const spawnCount = props.spawnCount === undefined ? 0 : props.spawnCount;
 			return h(
 				'div',
@@ -856,7 +881,7 @@ window.__ModuleLoader__.load({
 					'data-archived': props.archived ? 'true' : 'false',
 					'data-selected': props.selected ? 'true' : 'false',
 					'data-selectable': props.selectable ? 'true' : 'false',
-					style: { left: left + 'px', top: CARD_TOP + 'px' },
+					style: { left: left + 'px', top: top + 'px' },
 					title: title,
 					'aria-label': openLabel,
 					onClick: props.onActivate,
@@ -913,8 +938,10 @@ window.__ModuleLoader__.load({
 			const last = turns[turns.length - 1];
 			const prompt = String((first && first.prompt) || '').trim();
 			const response = String((last && last.response) || '').trim();
-			const left = TRACK_INSET + props.col * STEP;
-			const width = count * STEP - COL_GAP;
+			const left = TRACK_INSET + props.col * STEP - MERGE_BLEED;
+			const width = count * STEP - COL_GAP + MERGE_BLEED * 2;
+			const top = props.top === undefined ? CARD_TOP : props.top;
+			const height = props.height === undefined ? MERGE_CARD_H : props.height;
 			const title = turns.map((turn) => '#' + turn.turn + ': ' + String(turn.prompt || '').trim()).join('\n');
 			const label = formatTemplate(props.tr('merge.title'), { count: count });
 			return h(
@@ -927,7 +954,7 @@ window.__ModuleLoader__.load({
 					'data-archived': props.archived ? 'true' : 'false',
 					'data-selected': props.selected ? 'true' : 'false',
 					'data-selectable': props.selectable ? 'true' : 'false',
-					style: { left: left + 'px', top: CARD_TOP + 'px', width: width + 'px' },
+					style: { left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' },
 					title: title,
 					'aria-label': label,
 					onClick: (event) => props.onActivate(event),
@@ -969,12 +996,30 @@ window.__ModuleLoader__.load({
 			const rows = props.rows;
 			const spans = props.spans;
 			const paths = [];
+			const spanAt = (rowIndex, col) => {
+				const row = rows[rowIndex];
+				const rowSpans = spans === undefined ? undefined : spans[rowIndex];
+				if (rowSpans === undefined) return undefined;
+				const relative = col - (row.colOffset === undefined ? 0 : row.colOffset);
+				for (const span of rowSpans) {
+					if (span.from !== span.to && relative >= span.from && relative <= span.to) return span;
+				}
+				return undefined;
+			};
+			const anchorBottom = (rowIndex, col) => {
+				const row = rows[rowIndex];
+				return spanAt(rowIndex, col) === undefined ? rowNodeBottom(row) : rowMergedTop(row) + MERGE_CARD_H;
+			};
+			const anchorTop = (rowIndex, col) => {
+				const row = rows[rowIndex];
+				return spanAt(rowIndex, col) === undefined ? rowNodeTop(row) : rowMergedTop(row);
+			};
 			if (props.links !== false) {
 				for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
 					const row = rows[rowIndex];
 					if (row.mini === true) continue;
 					if (row.visibleTo <= row.visibleFrom) continue;
-					const y = row.top + CARD_TOP + CARD_H / 2;
+					const y = row.top + row.height / 2;
 					const base = row.colOffset === undefined ? 0 : row.colOffset;
 					const rowSpans = spans === undefined || spans[rowIndex] === undefined ? null : spans[rowIndex];
 					if (rowSpans !== null) {
@@ -1004,8 +1049,8 @@ window.__ModuleLoader__.load({
 			}
 			for (let index = 0; index < props.edges.length; index += 1) {
 				const edge = props.edges[index];
-				const y1 = rowNodeBottom(rows[edge.fromRow]);
-				const y2 = rowNodeTop(rows[edge.toRow]);
+				const y1 = anchorBottom(edge.fromRow, edge.fromCol);
+				const y2 = anchorTop(edge.toRow, edge.toCol);
 				let d;
 				if (edge.long === true) {
 					const startX = TRACK_INSET + edge.fromCol * STEP + COL_W / 2;
@@ -1038,7 +1083,7 @@ window.__ModuleLoader__.load({
 				}));
 				if (edge.kind === 'spawn' && edge.ring !== false) {
 					const anchorX = TRACK_INSET + edge.fromCol * STEP + COL_W / 2;
-					const anchorY = rowNodeBottom(rows[edge.fromRow]);
+					const anchorY = anchorBottom(edge.fromRow, edge.fromCol);
 					paths.push(h('circle', {
 						key: 'spawn-' + index,
 						className: 'st-spawn-dot',
@@ -1243,10 +1288,10 @@ window.__ModuleLoader__.load({
 					? null
 					: layoutGroup(
 						activeGroup,
-						{ showInherited: showInherited, showSubagents: showSubagents, exact: exactInheritance, archived: archivedSet },
+						{ showInherited: showInherited, showSubagents: showSubagents, exact: exactInheritance, merges: merges, archived: archivedSet },
 						sessionsState === undefined ? undefined : sessionsState.byId,
 					)),
-				[activeGroup, showInherited, showSubagents, exactInheritance, sessionsState, archivedSet],
+				[activeGroup, showInherited, showSubagents, exactInheritance, merges, sessionsState, archivedSet],
 			);
 			const linkSpans = useMemo(
 				() => (layout === null
@@ -1771,6 +1816,8 @@ window.__ModuleLoader__.load({
 									from: unit.from,
 									to: unit.to,
 									col: row.colOffset + unit.from,
+									top: row.mergedTop,
+									height: MERGE_CARD_H,
 									inherited: unit.from < row.inherited,
 									archived: row.archived,
 									selectable: selectMode,
@@ -1793,6 +1840,7 @@ window.__ModuleLoader__.load({
 								key: session.id + '-turn-' + turnIndex,
 								turn: turn,
 								col: row.colOffset + turnIndex,
+								top: row.cardTop,
 								inherited: turnIndex < row.inherited,
 								running: session.running === true && turnIndex === row.visibleTo,
 								archived: row.archived,

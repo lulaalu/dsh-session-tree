@@ -45,11 +45,63 @@ window.__ModuleLoader__.load({
 				/* storage is best effort */
 			}
 		};
+		const MERGES_KEY = 'session-tree:merges';
+		/**
+		 * Display-only merged turn ranges per Session (`[[from, to], …]`, 0-based turn
+		 * indices). Merging never touches the Session log: it only redraws one node
+		 * spanning the range, and branch edges keep their original columns.
+		 */
+		let mergesStored = {};
+		try {
+			const savedMerges = typeof localStorage === 'undefined' ? null : localStorage.getItem(MERGES_KEY);
+			if (typeof savedMerges === 'string' && savedMerges !== '') {
+				const parsed = JSON.parse(savedMerges);
+				if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+					for (const sessionId of Object.keys(parsed)) {
+						const ranges = parsed[sessionId];
+						if (!Array.isArray(ranges)) continue;
+						const clean = ranges.filter((range) => Array.isArray(range) && range.length === 2 && Number.isInteger(range[0]) && Number.isInteger(range[1]) && range[0] < range[1]);
+						if (clean.length > 0) mergesStored[sessionId] = clean;
+					}
+				}
+			}
+		} catch (error) {
+			mergesStored = {};
+		}
+		const persistMerges = (value) => {
+			try {
+				if (typeof localStorage === 'undefined') return;
+				localStorage.setItem(MERGES_KEY, JSON.stringify(value));
+			} catch (error) {
+				/* storage is best effort */
+			}
+		};
+		const normalizeRanges = (ranges) => {
+			const sorted = ranges
+				.filter((range) => Array.isArray(range) && range.length === 2 && range[0] < range[1])
+				.map((range) => [range[0], range[1]])
+				.sort((left, right) => left[0] - right[0]);
+			const merged = [];
+			for (const range of sorted) {
+				const last = merged[merged.length - 1];
+				if (last !== undefined && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1]);
+				else merged.push([range[0], range[1]]);
+			}
+			return merged;
+		};
+		/**
+		 * Exact fork-inherited turn counts per Session, fetched once per page load from
+		 * the Host route. Raw turn seqs are only unique inside one Session log, so the
+		 * client-side alignment fallback cannot separate an own turn from an inherited one
+		 * when both share seq and content; the Host knows the exact prefix event count.
+		 */
+		let exactInheritanceStored = {};
+		const INHERITANCE_ROUTE = 'api/session-tree/inherit';
 		//#endregion
 
 		//#region styles
 		const CSS = [
-			'.st-root{--st-label-w:240px;--st-accent:var(--dsw-alias-brand-primary);--st-card-border:var(--dsw-alias-border-l1);--st-line:var(--dsw-alias-border-l2);--st-label-bg:var(--dsw-alias-bg-base);display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}',
+			'.st-root{--st-label-w:240px;--st-accent:var(--dsw-alias-brand-primary);--st-card-border:var(--dsw-alias-border-l1);--st-line:var(--dsw-alias-border-l2);--st-label-bg:var(--dsw-alias-bg-base);position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}',
 			'.st-root[data-outline="strong"]{--st-card-border:color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent);--st-line:color-mix(in srgb, var(--dsw-alias-label-primary) 30%, transparent)}',
 			'.st-head{flex:none;display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:18px 24px 10px}',
 			'.st-headtext{min-width:0}',
@@ -123,6 +175,17 @@ window.__ModuleLoader__.load({
 			'.st-card-spawn{position:absolute;right:5px;bottom:4px;display:inline-flex;align-items:center;gap:3px;height:14px;padding:0 5px;border-radius:7px;background:color-mix(in srgb, var(--st-accent) 12%, transparent);color:var(--st-accent);font-size:9.5px;line-height:14px;pointer-events:none}',
 			'.st-card-spawn-count{font-variant-numeric:tabular-nums}',
 			'.st-row[data-mini="true"] .st-label-title{font-size:12px}',
+			'.st-body{cursor:grab}',
+			'.st-body[data-panning="true"]{cursor:grabbing;user-select:none}',
+			'.st-card[data-selected="true"]{border-color:var(--st-accent);box-shadow:0 0 0 2px color-mix(in srgb, var(--st-accent) 32%, transparent)}',
+			'.st-merge-count{margin-left:6px;font-size:10px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+			'.st-merge-split{position:absolute;right:6px;bottom:5px;height:14px;padding:0 6px;border-radius:6px;border:1px solid var(--st-card-border);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font:inherit;font-size:9.5px;line-height:12px;cursor:pointer;opacity:0;transition:opacity .12s}',
+			'.st-merge:hover .st-merge-split,.st-merge-split:focus-visible{opacity:1}',
+			'.st-toolbar{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;border-radius:999px;border:1px solid var(--st-card-border);background:var(--dsw-alias-bg-layer-1);box-shadow:0 4px 16px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);z-index:40}',
+			'.st-toolbar-text{font-size:11.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap}',
+			'.st-toolbar-btn{height:22px;padding:0 10px;border-radius:999px;border:1px solid var(--st-card-border);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;cursor:pointer}',
+			'.st-toolbar-btn:hover{border-color:var(--st-accent)}',
+			'.st-toolbar-primary{background:var(--st-accent);border-color:var(--st-accent);color:#fff}',
 			'.st-rowsep{position:absolute;left:18%;right:18%;bottom:-8px;height:1px;z-index:2;pointer-events:none;background:linear-gradient(90deg, transparent 0%, var(--st-line) 24%, var(--st-line) 76%, transparent 100%)}',
 			'.st-row[data-compact="true"] .st-label-title{font-size:12px}',
 			'.st-row[data-subagent="true"] .st-label{border-left:2px dotted var(--st-card-border)}',
@@ -225,6 +288,15 @@ window.__ModuleLoader__.load({
 			'error.renameEmpty': '名称不能为空',
 			'error.action': '操作失败：{code}',
 			'error.archiveActive': '会话仍在运行，请先停止再归档',
+			'toggle.select': '选择节点',
+			'toggle.selectHint': '选择连续节点后可以合并为一个显示节点',
+			'select.hint': '点击节点开始选择，Shift 点击选择范围',
+			'select.count': '已选 {count} 个节点',
+			'select.merge': '合并',
+			'select.exit': '退出选择',
+			'merge.title': '{count} 轮合并节点',
+			'merge.count': '合并 {count} 轮',
+			'merge.split': '拆分',
 		};
 		const EN = {
 			'panel.title': 'Session Tree',
@@ -285,6 +357,15 @@ window.__ModuleLoader__.load({
 			'error.renameEmpty': 'Name cannot be empty',
 			'error.action': 'Action failed: {code}',
 			'error.archiveActive': 'Session is still running; stop it before archiving',
+			'toggle.select': 'Select nodes',
+			'toggle.selectHint': 'Select a contiguous range of turns and merge them into one displayed node',
+			'select.hint': 'Click a node to start selecting; Shift-click to extend the range',
+			'select.count': '{count} nodes selected',
+			'select.merge': 'Merge',
+			'select.exit': 'Done',
+			'merge.title': 'Merged node of {count} turns',
+			'merge.count': '{count} turns merged',
+			'merge.split': 'Split',
 		};
 		//#endregion
 
@@ -408,12 +489,18 @@ window.__ModuleLoader__.load({
 				return known[id];
 			};
 			/** Length of the leading turn-run two Session logs share, by inherited event seq. */
+			const sameTurn = (left, right) => {
+				if (left === undefined || right === undefined) return false;
+				if (left.seq !== right.seq) return false;
+				if (String(left.prompt || '') !== String(right.prompt || '')) return false;
+				return String(left.response || '') === String(right.response || '');
+			};
 			const sharedPrefix = (left, right) => {
 				if (right === undefined) return 0;
 				const leftTurns = turnsOf(left);
 				const rightTurns = turnsOf(right);
 				let shared = 0;
-				while (shared < leftTurns.length && shared < rightTurns.length && leftTurns[shared].seq === rightTurns[shared].seq) shared += 1;
+				while (shared < leftTurns.length && shared < rightTurns.length && sameTurn(leftTurns[shared], rightTurns[shared])) shared += 1;
 				return shared;
 			};
 			/** Nearest ancestor that this view actually renders, skipping filtered-out Sessions. */
@@ -463,15 +550,32 @@ window.__ModuleLoader__.load({
 			const rows = [];
 			const rowBySession = new Map();
 			const seen = new Set();
+			// Exact prefix lengths come from the Host route (`inheritedEventCount`). Without
+			// them, fall back to aligning turn content against the parent, because raw seqs
+			// are only unique inside one Session log: a child's own first turn can reuse the
+			// same seq number as the parent's next turn and be mistaken for an inherited one.
+			const exactTurnsOf = (session) => {
+				const table = options.exact;
+				if (table === undefined || table === null) return undefined;
+				const boundary = table[session.id];
+				if (typeof boundary !== 'number' || !Number.isFinite(boundary)) return undefined;
+				const turns = turnsOf(session);
+				let count = 0;
+				while (count < turns.length && turns[count].seq < boundary) count += 1;
+				return count;
+			};
 			const walk = (session, depth) => {
 				if (seen.has(session.id)) return;
 				seen.add(session.id);
 				const turns = turnsOf(session);
 				const directParent = session.parentId && session.parentId !== session.id ? knownOf(session.parentId) : undefined;
 				const effectiveParent = parentOf.get(session.id);
-				const directInherited = sharedPrefix(session, directParent);
-				const effectiveInherited = effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent);
-				const inherited = Math.max(directInherited, effectiveInherited);
+				const exactInherited = exactTurnsOf(session);
+				const directInherited = exactInherited === undefined ? sharedPrefix(session, directParent) : exactInherited;
+				const effectiveInherited = exactInherited === undefined
+					? (effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent))
+					: exactInherited;
+				const inherited = exactInherited === undefined ? Math.max(directInherited, effectiveInherited) : exactInherited;
 				const parentRowForOffset = effectiveParent === undefined ? undefined : rowBySession.get(effectiveParent.id);
 				const isSubagent = session.origin === 'subagent';
 				if (isSubagent && options.showSubagents !== true) {
@@ -750,14 +854,16 @@ window.__ModuleLoader__.load({
 					'data-inherited': props.inherited ? 'true' : 'false',
 					'data-running': props.running ? 'true' : 'false',
 					'data-archived': props.archived ? 'true' : 'false',
+					'data-selected': props.selected ? 'true' : 'false',
+					'data-selectable': props.selectable ? 'true' : 'false',
 					style: { left: left + 'px', top: CARD_TOP + 'px' },
 					title: title,
 					'aria-label': openLabel,
-					onClick: props.onOpen,
+					onClick: props.onActivate,
 					onKeyDown: (event) => {
 						if (event.key === 'Enter' || event.key === ' ') {
 							event.preventDefault();
-							props.onOpen();
+							props.onActivate(event);
 						}
 					},
 				},
@@ -768,7 +874,7 @@ window.__ModuleLoader__.load({
 				),
 				h('div', { className: 'st-card-prompt' }, prompt || '…'),
 				response ? h('div', { className: 'st-card-reply' }, response) : null,
-				props.inherited
+				props.inherited || props.selectable
 					? null
 					: h(
 						'button',
@@ -800,8 +906,68 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		function MergedCard(props) {
+			const turns = props.turns;
+			const count = props.to - props.from + 1;
+			const first = turns[0];
+			const last = turns[turns.length - 1];
+			const prompt = String((first && first.prompt) || '').trim();
+			const response = String((last && last.response) || '').trim();
+			const left = TRACK_INSET + props.col * STEP;
+			const width = count * STEP - COL_GAP;
+			const title = turns.map((turn) => '#' + turn.turn + ': ' + String(turn.prompt || '').trim()).join('\n');
+			const label = formatTemplate(props.tr('merge.title'), { count: count });
+			return h(
+				'div',
+				{
+					className: 'st-card st-merge',
+					role: 'button',
+					tabIndex: 0,
+					'data-inherited': props.inherited ? 'true' : 'false',
+					'data-archived': props.archived ? 'true' : 'false',
+					'data-selected': props.selected ? 'true' : 'false',
+					'data-selectable': props.selectable ? 'true' : 'false',
+					style: { left: left + 'px', top: CARD_TOP + 'px', width: width + 'px' },
+					title: title,
+					'aria-label': label,
+					onClick: (event) => props.onActivate(event),
+					onKeyDown: (event) => {
+						if (event.key === 'Enter' || event.key === ' ') {
+							event.preventDefault();
+							props.onActivate(event);
+						}
+					},
+				},
+				h(
+					'div',
+					{ className: 'st-card-head' },
+					h('span', { className: 'st-card-turn' }, '#' + first.turn + '–#' + last.turn),
+					h('span', { className: 'st-merge-count' }, formatTemplate(props.tr('merge.count'), { count: count })),
+				),
+				h('div', { className: 'st-card-prompt' }, prompt || '…'),
+				response === '' ? null : h('div', { className: 'st-card-reply' }, response),
+				props.selectable
+					? null
+					: h(
+						'button',
+						{
+							className: 'st-merge-split',
+							type: 'button',
+							title: props.tr('merge.split'),
+							'aria-label': props.tr('merge.split'),
+							onClick: (event) => {
+								event.stopPropagation();
+								props.onSplit();
+							},
+						},
+						props.tr('merge.split'),
+					),
+			);
+		}
+
 		function EdgeLayer(props) {
 			const rows = props.rows;
+			const spans = props.spans;
 			const paths = [];
 			if (props.links !== false) {
 				for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
@@ -810,6 +976,21 @@ window.__ModuleLoader__.load({
 					if (row.visibleTo <= row.visibleFrom) continue;
 					const y = row.top + CARD_TOP + CARD_H / 2;
 					const base = row.colOffset === undefined ? 0 : row.colOffset;
+					const rowSpans = spans === undefined || spans[rowIndex] === undefined ? null : spans[rowIndex];
+					if (rowSpans !== null) {
+						for (let spanIndex = 0; spanIndex + 1 < rowSpans.length; spanIndex += 1) {
+							const leftSpan = rowSpans[spanIndex];
+							const rightSpan = rowSpans[spanIndex + 1];
+							const x1 = TRACK_INSET + (base + leftSpan.to) * STEP + COL_W - 3;
+							const x2 = TRACK_INSET + (base + rightSpan.from) * STEP + 3;
+							paths.push(h('path', {
+								key: 'link-' + rowIndex + '-span-' + spanIndex,
+								className: 'st-link',
+								d: 'M' + x1 + ' ' + y + 'L' + x2 + ' ' + y,
+							}));
+						}
+						continue;
+					}
 					for (let col = row.visibleFrom; col < row.visibleTo; col += 1) {
 						const x1 = TRACK_INSET + (base + col) * STEP + COL_W - 3;
 						const x2 = TRACK_INSET + (base + col + 1) * STEP + 3;
@@ -1002,12 +1183,53 @@ window.__ModuleLoader__.load({
 			const [accent, setAccent] = useState(accentStored);
 			const [dialog, setDialog] = useState(null);
 			const [showRowSeps, setShowRowSeps] = useState(false);
+			const [exactInheritance, setExactInheritance] = useState(exactInheritanceStored);
+			const [selectMode, setSelectMode] = useState(false);
+			const [selection, setSelection] = useState(null);
+			const [merges, setMerges] = useState(mergesStored);
+			const [panning, setPanning] = useState(false);
+			const exactPending = useRef({});
+			const bodyRef = useRef(null);
+			const panRef = useRef(null);
+			const panStopRef = useRef(null);
 			const requested = useRef({});
 			const dragRef = useRef(false);
 			const rootRef = useRef(null);
 			const actions = props.sessionActions === undefined ? {} : props.sessionActions;
 			const pinnedSet = useMemo(() => new Set((workspacesState && workspacesState.pinnedSessionIds) || []), [workspacesState]);
 			const archivedSet = useMemo(() => new Set((workspacesState && workspacesState.archivedSessionIds) || []), [workspacesState]);
+
+			// Display-only merge state: turn ranges per Session, never written to the log.
+			const selectionRange = selection === null
+				? null
+				: {
+					sessionId: selection.sessionId,
+					from: Math.min(selection.anchor, selection.focus),
+					to: Math.max(selection.anchor, selection.focus),
+				};
+			const turnSelected = (sessionId, index) => selectionRange !== null && selectionRange.sessionId === sessionId && index >= selectionRange.from && index <= selectionRange.to;
+			const mergedRangesFor = (sessionId) => (Array.isArray(merges[sessionId]) ? merges[sessionId] : []);
+			const rowUnits = (row) => {
+				const units = [];
+				if (row.mini === true || row.visibleTo < row.visibleFrom) return units;
+				let cursor = row.visibleFrom;
+				for (const range of mergedRangesFor(row.session.id)) {
+					const from = Math.max(range[0], row.visibleFrom);
+					const to = Math.min(range[1], row.visibleTo);
+					if (to < from) continue;
+					while (cursor < from) {
+						units.push({ kind: 'card', index: cursor });
+						cursor += 1;
+					}
+					units.push({ kind: 'merge', from: from, to: to });
+					cursor = to + 1;
+				}
+				while (cursor <= row.visibleTo) {
+					units.push({ kind: 'card', index: cursor });
+					cursor += 1;
+				}
+				return units;
+			};
 
 			const model = useMemo(
 				() => buildModel(sessionsState, workspacesState, { showSubagents: showSubagents, showArchived: showArchived }),
@@ -1021,10 +1243,16 @@ window.__ModuleLoader__.load({
 					? null
 					: layoutGroup(
 						activeGroup,
-						{ showInherited: showInherited, showSubagents: showSubagents, archived: archivedSet },
+						{ showInherited: showInherited, showSubagents: showSubagents, exact: exactInheritance, archived: archivedSet },
 						sessionsState === undefined ? undefined : sessionsState.byId,
 					)),
-				[activeGroup, showInherited, showSubagents, sessionsState, archivedSet],
+				[activeGroup, showInherited, showSubagents, exactInheritance, sessionsState, archivedSet],
+			);
+			const linkSpans = useMemo(
+				() => (layout === null
+					? []
+					: layout.rows.map((row) => rowUnits(row).map((unit) => (unit.kind === 'merge' ? { from: unit.from, to: unit.to } : { from: unit.index, to: unit.index })))),
+				[layout, merges],
 			);
 
 			useEffect(() => {
@@ -1041,6 +1269,50 @@ window.__ModuleLoader__.load({
 					}
 				}
 			}, [activeGroup, props.refreshProjections]);
+
+			useEffect(() => {
+				if (activeGroup === undefined) return undefined;
+				if (typeof document === 'undefined' || typeof document.baseURI !== 'string' || typeof fetch !== 'function') return undefined;
+				const ids = [];
+				for (const session of activeGroup.sessions) {
+					if (session.parentId === undefined || session.parentId === null || session.parentId === '') continue;
+					if (Object.prototype.hasOwnProperty.call(exactInheritanceStored, session.id)) continue;
+					if (exactPending.current[session.id] === true) continue;
+					ids.push(session.id);
+				}
+				if (ids.length === 0) return undefined;
+				let cancelled = false;
+				const resolveChunk = async (chunk) => {
+					for (const sessionId of chunk) exactPending.current[sessionId] = true;
+					let counts = null;
+					try {
+						const url = new URL(INHERITANCE_ROUTE + '?ids=' + encodeURIComponent(chunk.join(',')), document.baseURI);
+						const response = await fetch(url.href, { credentials: 'same-origin' });
+						if (response !== undefined && response !== null && response.ok === true) {
+							const payload = await response.json();
+							counts = payload !== null && typeof payload === 'object' && payload.counts !== undefined && payload.counts !== null && typeof payload.counts === 'object'
+								? payload.counts
+								: payload;
+						}
+					} catch (error) {
+						counts = null;
+					}
+					for (const sessionId of chunk) {
+						const value = counts === null || typeof counts !== 'object' ? undefined : counts[sessionId];
+						exactInheritanceStored[sessionId] = typeof value === 'number' && Number.isFinite(value) ? value : null;
+					}
+				};
+				const run = async () => {
+					for (let offset = 0; offset < ids.length && cancelled === false; offset += 20) {
+						await resolveChunk(ids.slice(offset, offset + 20));
+						if (cancelled === false) setExactInheritance(Object.assign({}, exactInheritanceStored));
+					}
+				};
+				Promise.resolve().then(run);
+				return () => {
+					cancelled = true;
+				};
+			}, [activeGroup]);
 
 			useEffect(() => {
 				if (menuFor === null && !showSettings) return undefined;
@@ -1064,6 +1336,56 @@ window.__ModuleLoader__.load({
 				document.addEventListener('keydown', onKeyDown);
 				return () => document.removeEventListener('keydown', onKeyDown);
 			}, [dialog]);
+
+			useEffect(() => () => {
+				if (panStopRef.current !== null) {
+					panStopRef.current();
+					panStopRef.current = null;
+				}
+			}, []);
+
+			/** Drag the canvas itself: the tree scrolls horizontally/vertically like a map. */
+			const PAN_IGNORE = '.st-card, .st-mini, .st-label, .st-menu, .st-menu-trigger, .st-settings-trigger, .st-popover, .st-resizer, .st-toolbar, button, input, select, textarea, a';
+			const startPan = (event) => {
+				if (event.button !== 0 || event.defaultPrevented === true) return;
+				const target = event.target;
+				if (target instanceof Element && target.closest(PAN_IGNORE) !== null) return;
+				const body = bodyRef.current;
+				if (body === null) return;
+				const pan = { x: event.clientX, y: event.clientY, left: body.scrollLeft, top: body.scrollTop, moved: false };
+				panRef.current = pan;
+				setPanning(true);
+				const move = (moveEvent) => {
+					if (panRef.current !== pan) return;
+					const dx = moveEvent.clientX - pan.x;
+					const dy = moveEvent.clientY - pan.y;
+					if (pan.moved !== true && Math.abs(dx) + Math.abs(dy) > 4) pan.moved = true;
+					if (pan.moved === true) {
+						body.scrollLeft = pan.left - dx;
+						body.scrollTop = pan.top - dy;
+					}
+				};
+				const stop = () => {
+					panStopRef.current = null;
+					setPanning(false);
+					window.removeEventListener('pointermove', move);
+					window.removeEventListener('pointerup', stop);
+					window.removeEventListener('pointercancel', stop);
+					setTimeout(() => {
+						if (panRef.current === pan) panRef.current = null;
+					}, 0);
+				};
+				panStopRef.current = stop;
+				window.addEventListener('pointermove', move);
+				window.addEventListener('pointerup', stop);
+				window.addEventListener('pointercancel', stop);
+			};
+			const suppressPanClick = (event) => {
+				const pan = panRef.current;
+				if (pan === null || pan.moved !== true) return;
+				event.preventDefault();
+				event.stopPropagation();
+			};
 
 			const reportError = (key) => {
 				setError(tr(key));
@@ -1227,6 +1549,48 @@ window.__ModuleLoader__.load({
 				} catch (error) {
 					/* navigation is best effort */
 				}
+			};
+			const selectTurn = (sessionId, index, extend) => {
+				if (selectMode !== true) return;
+				const current = selection;
+				if (current === null || current.sessionId !== sessionId || extend !== true) {
+					setSelection({ sessionId: sessionId, anchor: index, focus: index });
+					return;
+				}
+				setSelection({ sessionId: sessionId, anchor: current.anchor, focus: index });
+			};
+			const selectBlock = (sessionId, from, to, extend) => {
+				if (selectMode !== true) return;
+				const current = selection;
+				if (current === null || current.sessionId !== sessionId || extend !== true) {
+					setSelection({ sessionId: sessionId, anchor: from, focus: to });
+					return;
+				}
+				setSelection({ sessionId: sessionId, anchor: current.anchor, focus: to });
+			};
+			const applyMerge = () => {
+				const range = selectionRange;
+				if (range === null || range.to - range.from + 1 < 2) return;
+				const next = Object.assign({}, merges);
+				next[range.sessionId] = normalizeRanges(mergedRangesFor(range.sessionId).concat([[range.from, range.to]]));
+				mergesStored = next;
+				persistMerges(next);
+				setMerges(next);
+				setSelection(null);
+				setSelectMode(false);
+			};
+			const splitMerge = (sessionId, from, to) => {
+				const keep = mergedRangesFor(sessionId).filter((range) => !(range[0] <= from && range[1] >= to));
+				const next = Object.assign({}, merges);
+				if (keep.length === 0) delete next[sessionId];
+				else next[sessionId] = normalizeRanges(keep);
+				mergesStored = next;
+				persistMerges(next);
+				setMerges(next);
+			};
+			const exitSelect = () => {
+				setSelection(null);
+				setSelectMode(false);
 			};
 
 			const headerStats = layout === null
@@ -1396,7 +1760,32 @@ window.__ModuleLoader__.load({
 						h('span', { className: 'st-mini-count' }, String(row.turns.length)),
 					));
 				} else {
-					for (let turnIndex = row.visibleFrom; turnIndex <= row.visibleTo; turnIndex += 1) {
+					for (const unit of rowUnits(row)) {
+						if (unit.kind === 'merge') {
+							const mergedTurns = row.turns.slice(unit.from, unit.to + 1).filter((turn) => turn !== undefined);
+							if (mergedTurns.length === 0) continue;
+							trackChildren.push(
+								h(MergedCard, {
+									key: session.id + '-merge-' + unit.from,
+									turns: mergedTurns,
+									from: unit.from,
+									to: unit.to,
+									col: row.colOffset + unit.from,
+									inherited: unit.from < row.inherited,
+									archived: row.archived,
+									selectable: selectMode,
+									selected: turnSelected(session.id, unit.from),
+									tr: tr,
+									onActivate: (event) => {
+										if (selectMode) selectBlock(session.id, unit.from, unit.to, event !== undefined && event.shiftKey === true);
+										else openTurn(row, mergedTurns[0]);
+									},
+									onSplit: () => splitMerge(session.id, unit.from, unit.to),
+								}),
+							);
+							continue;
+						}
+						const turnIndex = unit.index;
 						const turn = row.turns[turnIndex];
 						if (turn === undefined) continue;
 						trackChildren.push(
@@ -1408,8 +1797,13 @@ window.__ModuleLoader__.load({
 								running: session.running === true && turnIndex === row.visibleTo,
 								archived: row.archived,
 								spawnCount: row.spawns === undefined ? 0 : (row.spawns.get(turnIndex) === undefined ? 0 : row.spawns.get(turnIndex)),
+								selectable: selectMode,
+								selected: turnSelected(session.id, turnIndex),
 								tr: tr,
-								onOpen: () => openTurn(row, turn),
+								onActivate: (event) => {
+									if (selectMode) selectTurn(session.id, turnIndex, event !== undefined && event.shiftKey === true);
+									else openTurn(row, turn);
+								},
 								onFork: () => forkTurn(row, turn, turnIndex),
 							}),
 						);
@@ -1448,6 +1842,23 @@ window.__ModuleLoader__.load({
 				},
 			});
 
+			const selectionCount = selectionRange === null ? 0 : selectionRange.to - selectionRange.from + 1;
+			const toolbarView = selectMode !== true
+				? null
+				: h(
+					'div',
+					{ className: 'st-toolbar', role: 'toolbar', 'aria-label': tr('toggle.select') },
+					h('span', { className: 'st-toolbar-text' }, selectionCount > 1 ? formatTemplate(tr('select.count'), { count: selectionCount }) : tr('select.hint')),
+					selectionCount > 1
+						? h(
+							'button',
+							{ className: 'st-toolbar-btn st-toolbar-primary', type: 'button', onClick: applyMerge },
+							tr('select.merge'),
+						)
+						: null,
+					h('button', { className: 'st-toolbar-btn', type: 'button', onClick: exitSelect }, tr('select.exit')),
+				);
+
 			const body = layout === null || layout.rows.length === 0
 				? h(
 					'div',
@@ -1457,7 +1868,13 @@ window.__ModuleLoader__.load({
 				)
 				: h(
 					'div',
-					{ className: 'st-body' },
+					{
+						className: 'st-body',
+						ref: bodyRef,
+						onPointerDown: startPan,
+						onClickCapture: suppressPanClick,
+						'data-panning': panning ? 'true' : 'false',
+					},
 					h(
 						'div',
 						{ className: 'st-grid', style: { minHeight: layout.gridHeight + 'px' } },
@@ -1465,6 +1882,7 @@ window.__ModuleLoader__.load({
 							key: 'edges',
 							rows: layout.rows,
 							edges: layout.edges,
+							spans: linkSpans,
 							links: showLinks,
 							separators: showRowSeps,
 							separatorY: layout.separators,
@@ -1548,6 +1966,15 @@ window.__ModuleLoader__.load({
 							on: showArchived,
 							onToggle: () => setShowArchived(!showArchived),
 						}),
+						h(Toggle, {
+							label: tr('toggle.select'),
+							hint: tr('toggle.selectHint'),
+							on: selectMode,
+							onToggle: () => {
+								if (selectMode) exitSelect();
+								else setSelectMode(true);
+							},
+						}),
 						h(
 							'div',
 							{ className: 'st-settings', key: 'settings' },
@@ -1610,6 +2037,7 @@ window.__ModuleLoader__.load({
 				h('div', { className: 'st-hint' }, tr('hint')),
 				error === null ? null : h('div', { className: 'st-error' }, error),
 				body,
+				toolbarView,
 				dialogView,
 			);
 		}

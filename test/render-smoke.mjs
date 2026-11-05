@@ -95,6 +95,8 @@ function makeFakeReact() {
       if (props['data-compact'] === 'true') React.seen.push('data-compact');
       if (props['data-subagent'] === 'true') React.seen.push('data-subagent');
       if (props['data-mini'] === 'true') React.seen.push('data-mini');
+      if (props['data-selected'] === 'true') React.seen.push('data-selected');
+      if (props['data-selectable'] === 'true') React.seen.push('data-selectable');
       if (props.children !== undefined) renderNode(props.children);
     }
   };
@@ -256,6 +258,59 @@ function makeEmptyFork() {
   const c = { id: 'E2', title: 'E', displayTitle: 'E', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 4000, parentId: 'E1', projectionValues: { turnOutline: base } };
   return { ids: ['E1', 'E2'], byId: { E1: p, E2: c } };
 }
+
+function makeSeqCollision() {
+  // Real-world case: a fork from turn 1 of a Session whose repeated prompt/response
+  // produced the SAME seq numbers as the child's own next turn. Same seq but different
+  // turn content must not be read as an inherited turn.
+  const parentTurnsList = [
+    { turn: 1, seq: 5, prompt: 'test01，你只回复1就行', response: '1' },
+    { turn: 2, seq: 24, prompt: 'test01，你只回复1就行', response: '1' },
+    { turn: 3, seq: 36, prompt: 'test01，你只回复1就行', response: '1' },
+  ];
+  const p = { id: 'K1', title: 'P', displayTitle: 'P', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 5000, projectionValues: { turnOutline: parentTurnsList } };
+  const c = { id: 'K2', title: 'C', displayTitle: 'C', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 4000, parentId: 'K1', projectionValues: { turnOutline: [parentTurnsList[0], { turn: 2, seq: 24, prompt: 'test333', response: '收到' }] } };
+  return { ids: ['K1', 'K2'], byId: { K1: p, K2: c } };
+}
+
+function makeAmbiguousCollision() {
+  // Harder case: the child's own turn shares seq AND content with the parent's next
+  // turn. Only the Host-provided exact inheritedEventCount can separate them.
+  const parentTurnsList = [
+    { turn: 1, seq: 5, prompt: 'test01，你只回复1就行', response: '1' },
+    { turn: 2, seq: 24, prompt: 'test01，你只回复1就行', response: '1' },
+  ];
+  const p = { id: 'K1', title: 'P', displayTitle: 'P', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 5000, projectionValues: { turnOutline: parentTurnsList } };
+  const c = { id: 'K2', title: 'C', displayTitle: 'C', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 4000, parentId: 'K1', projectionValues: { turnOutline: [parentTurnsList[0], { turn: 2, seq: 24, prompt: 'test01，你只回复1就行', response: '1' }] } };
+  return { ids: ['K1', 'K2'], byId: { K1: p, K2: c } };
+}
+
+renderScenario('fork seq collision keeps own turn', makeSeqCollision(), workspace, undefined, {
+  has: ['st-card', 'st-label-fork'],
+  absent: ['data-compact'],
+  counts: { 'st-card': 4 },
+});
+renderScenario('exact inheritance count wins over ambiguity', makeAmbiguousCollision(), workspace, { 13: { K2: 21 } }, {
+  has: ['st-card'],
+  absent: ['data-compact'],
+  counts: { 'st-card': 3 },
+});
+renderScenario('merged node spans its turns', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[1, 3]] } }, {
+  has: ['st-merge', 'st-merge-count'],
+  counts: { 'st-card': 5, 'st-link': 3 },
+});
+renderScenario('fully merged row keeps no inner links', makeSessions(['s1', 's2']), workspace, { 16: { s1: [[0, 4]] } }, {
+  has: ['st-merge'],
+  counts: { 'st-card': 3, 'st-link': 1, 'st-merge': 1 },
+});
+renderScenario('select mode toolbar', makeSessions(['s1', 's2']), workspace, { 14: true, 15: { sessionId: 's1', anchor: 1, focus: 3 } }, {
+  has: ['st-toolbar', 'st-toolbar-primary', 'data-selectable', 'data-selected'],
+  counts: { 'st-card': 7 },
+});
+renderScenario('select mode idle hint', makeSessions(['s1', 's2']), workspace, { 14: true }, {
+  has: ['st-toolbar', 'st-toolbar-text', 'data-selectable'],
+  absent: ['st-toolbar-primary'],
+});
 
 function makeSubagents() {
   const base = turns(4, 0, 1);

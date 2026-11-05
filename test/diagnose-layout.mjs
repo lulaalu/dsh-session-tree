@@ -90,6 +90,9 @@ for (const id of readdirSync(ROOT).filter((name) => name.startsWith('session-'))
     origin: disk.header.origin,
     createdAt: disk.header.createdAt,
     isSeeded: disk.header.isSeeded === true,
+    inheritedEventCount: cache !== undefined && cache.record !== undefined && cache.record.identity !== undefined
+      ? cache.record.identity.inheritedEventCount
+      : undefined,
     updatedAt: (metadata !== undefined && metadata.lastPromptAt) || disk.header.createdAt,
     blank: metadata !== undefined ? metadata.blank : false,
     turns,
@@ -152,11 +155,22 @@ function layout(options) {
     }
     return undefined;
   };
+  const sameTurn = (left, right) => left !== undefined && right !== undefined
+    && left.seq === right.seq
+    && String(left.prompt || '') === String(right.prompt || '')
+    && String(left.response || '') === String(right.response || '');
   const sharedPrefix = (left, right) => {
     if (right === undefined) return 0;
     let shared = 0;
-    while (shared < left.turns.length && shared < right.turns.length && left.turns[shared].seq === right.turns[shared].seq) shared += 1;
+    while (shared < left.turns.length && shared < right.turns.length && sameTurn(left.turns[shared], right.turns[shared])) shared += 1;
     return shared;
+  };
+  const exactTurns = (session) => {
+    const boundary = session.inheritedEventCount;
+    if (typeof boundary !== 'number') return undefined;
+    let count = 0;
+    while (count < session.turns.length && session.turns[count].seq < boundary) count += 1;
+    return count;
   };
   const rows = [];
   const seen = new Set();
@@ -165,15 +179,16 @@ function layout(options) {
     seen.add(session.id);
     const directParent = session.parentSession === undefined ? undefined : known.get(session.parentSession);
     const effectiveParent = visibleAncestorOf(session);
-    const directInherited = sharedPrefix(session, directParent);
-    const effectiveInherited = effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent);
+    const exact = exactTurns(session);
+    const directInherited = exact === undefined ? sharedPrefix(session, directParent) : exact;
+    const effectiveInherited = exact === undefined ? (effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent)) : exact;
     rows.push({
       id: session.id,
       turns: session.turns.length,
       depth,
       parentId: effectiveParent === undefined ? undefined : effectiveParent.id,
       directId: directParent === undefined ? undefined : directParent.id,
-      inherited: Math.max(directInherited, effectiveInherited),
+      inherited: exact === undefined ? Math.max(directInherited, effectiveInherited) : exact,
       effectiveInherited,
       forkCol: effectiveParent === undefined ? -1 : effectiveInherited - 1,
       visibleFrom: options.showInherited || effectiveParent === undefined ? 0 : effectiveInherited,

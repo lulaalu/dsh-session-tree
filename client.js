@@ -36,13 +36,17 @@ window.__ModuleLoader__.load({
 		const EMPTY_WORKSPACES = { items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null };
 		/** Label column width survives panel switches (module-scoped, not persisted). */
 		let labelWidthStored = LABEL_W;
+		/** Default accent: DeepSeek brand blue, independent of the active theme. */
+		const DEFAULT_ACCENT = '#4d6bfe';
+		const THEME_ACCENT = 'theme';
 		const ACCENT_KEY = 'session-tree:accent';
-		let accentStored = null;
+		let accentStored = DEFAULT_ACCENT;
 		try {
 			const savedAccent = typeof localStorage === 'undefined' ? null : localStorage.getItem(ACCENT_KEY);
-			if (typeof savedAccent === 'string' && /^#[0-9a-fA-F]{6}$/.test(savedAccent)) accentStored = savedAccent;
+			if (savedAccent === THEME_ACCENT) accentStored = THEME_ACCENT;
+			else if (typeof savedAccent === 'string' && /^#[0-9a-fA-F]{6}$/.test(savedAccent)) accentStored = savedAccent;
 		} catch (error) {
-			accentStored = null;
+			accentStored = DEFAULT_ACCENT;
 		}
 		const persistAccent = (value) => {
 			try {
@@ -115,7 +119,7 @@ window.__ModuleLoader__.load({
 
 		//#region styles
 		const CSS = [
-			'.st-root{--st-label-w:240px;--st-accent:var(--dsw-alias-brand-primary);--st-card-border:var(--dsw-alias-border-l1);--st-line:var(--dsw-alias-border-l2);--st-label-bg:var(--dsw-alias-bg-base);position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}',
+			'.st-root{--st-label-w:240px;--st-accent:#4d6bfe;--st-card-border:var(--dsw-alias-border-l1);--st-line:var(--dsw-alias-border-l2);--st-label-bg:var(--dsw-alias-bg-base);position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}',
 			'.st-root[data-outline="strong"]{--st-card-border:color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent);--st-line:color-mix(in srgb, var(--dsw-alias-label-primary) 30%, transparent)}',
 			'.st-head{flex:none;display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:18px 24px 10px}',
 			'.st-headtext{min-width:0}',
@@ -177,6 +181,7 @@ window.__ModuleLoader__.load({
 			'.st-popover-note{margin-top:10px;font-size:11px;line-height:1.55;color:var(--dsw-alias-label-secondary)}',
 			'.st-link-btn{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11.5px;cursor:pointer}',
 			'.st-link-btn:hover{background:color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)}',
+			'.st-link-btn[data-active="true"]{border-color:var(--st-accent);color:var(--st-accent);background:color-mix(in srgb, var(--st-accent) 10%, transparent)}',
 			'.st-label-title{font-size:12.5px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
 			'.st-label-meta{font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
 			'.st-label-fork{font-size:10.5px;color:var(--st-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
@@ -295,7 +300,8 @@ window.__ModuleLoader__.load({
 			'settings.open': '外观设置',
 			'settings.accent': '强调色',
 			'settings.theme': '跟随主题',
-			'settings.accentNote': '用于连线高亮、节点悬停边框、分叉按钮和开关。默认跟随当前主题的品牌色。',
+			'settings.default': '默认蓝色',
+			'settings.accentNote': '用于连线高亮、节点悬停边框、分叉按钮和开关。默认是 DeepSeek 蓝，也可以选择跟随当前主题的品牌色。',
 			'dialog.rename.title': '重命名会话',
 			'dialog.rename.placeholder': '输入会话名称',
 			'dialog.archive.title': '会话仍在运行',
@@ -366,7 +372,8 @@ window.__ModuleLoader__.load({
 			'settings.open': 'Appearance',
 			'settings.accent': 'Accent color',
 			'settings.theme': 'Use theme',
-			'settings.accentNote': 'Used for highlighted links, card hover outlines, fork buttons and toggles. Defaults to the current theme brand color.',
+			'settings.default': 'Default blue',
+			'settings.accentNote': 'Used for highlighted links, card hover outlines, fork buttons and toggles. Defaults to DeepSeek blue; "Use theme" follows the current theme brand color.',
 			'dialog.rename.title': 'Rename session',
 			'dialog.rename.placeholder': 'Session name',
 			'dialog.archive.title': 'Session is still running',
@@ -2109,7 +2116,7 @@ window.__ModuleLoader__.load({
 					'data-outline': strongOutline ? 'strong' : 'soft',
 					style: {
 						'--st-label-w': labelWidth + 'px',
-						'--st-accent': accent === null ? 'var(--dsw-alias-brand-primary)' : accent,
+						'--st-accent': accent === THEME_ACCENT ? 'var(--dsw-alias-brand-primary)' : accent,
 					},
 					ref: rootRef,
 				},
@@ -2213,7 +2220,7 @@ window.__ModuleLoader__.load({
 										h('input', {
 											className: 'st-color',
 											type: 'color',
-											value: accent === null ? '#4d6bfe' : accent,
+											value: accent === THEME_ACCENT ? DEFAULT_ACCENT : accent,
 											'aria-label': tr('settings.accent'),
 											onChange: (event) => {
 												const next = event.target.value;
@@ -2227,10 +2234,25 @@ window.__ModuleLoader__.load({
 											{
 												className: 'st-link-btn',
 												type: 'button',
+												'data-active': accent === DEFAULT_ACCENT ? 'true' : 'false',
 												onClick: () => {
-													accentStored = null;
-													persistAccent(null);
-													setAccent(null);
+													accentStored = DEFAULT_ACCENT;
+													persistAccent(DEFAULT_ACCENT);
+													setAccent(DEFAULT_ACCENT);
+												},
+											},
+											tr('settings.default'),
+										),
+										h(
+											'button',
+											{
+												className: 'st-link-btn',
+												type: 'button',
+												'data-active': accent === THEME_ACCENT ? 'true' : 'false',
+												onClick: () => {
+													accentStored = THEME_ACCENT;
+													persistAccent(THEME_ACCENT);
+													setAccent(THEME_ACCENT);
 												},
 											},
 											tr('settings.theme'),

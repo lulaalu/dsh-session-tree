@@ -1,0 +1,36 @@
+name: publish
+
+# npm Trusted Publishing: GitHub Actions authenticates to npm with OIDC
+# (no access token and no OTP). Configure the trusted publisher once on
+# npmjs.com → package settings → Trusted publishing, with:
+#   organization/user: lulaalu
+#   repository:        dsh-session-tree
+#   workflow file:     publish.yml
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install-free checks
+        run: |
+          node --check index.js
+          node --check client.js
+          node test/render-smoke.mjs
+
+      - name: Publish
+        run: npm publish --access public --provenance

@@ -75,7 +75,7 @@ dsh --version
 
 ```powershell
 # Pin the release tag
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.1
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.2
 ```
 
 Use `--profile desktop` for the desktop app. The plugin manager / agent equivalent is:
@@ -113,7 +113,7 @@ This is a pnpm `link:` install: files are not copied, the profile only records a
 
 ```powershell
 pnpm pack
-dsh plugin --profile web add .\lulaalu-dsh-session-tree-0.1.1.tgz
+dsh plugin --profile web add .\lulaalu-dsh-session-tree-0.1.2.tgz
 ```
 
 ### Uninstall

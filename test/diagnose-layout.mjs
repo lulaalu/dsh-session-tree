@@ -75,8 +75,14 @@ for (const id of readdirSync(ROOT).filter((name) => name.startsWith('session-'))
   if (disk === undefined || disk.header === undefined) continue;
   if (disk.header.cwd === undefined) continue;
   let cache;
-  const cachePath = join(PROJCACHE, id + '.json');
-  if (existsSync(cachePath)) cache = readJson(cachePath);
+  // 0.2.1 named cache files "<uuid>.json"; 0.2.2 writes "<session-id>.json".
+  const cachePaths = [join(PROJCACHE, id + '.json'), join(PROJCACHE, id.replace(/^session-/, '') + '.json')];
+  for (const cachePath of cachePaths) {
+    if (existsSync(cachePath)) {
+      cache = readJson(cachePath);
+      break;
+    }
+  }
   const rows = cache !== undefined && cache.record !== undefined ? cache.record.rows : undefined;
   const metadata = rows !== undefined && rows.sessionListMetadata !== undefined ? rows.sessionListMetadata.val : undefined;
   const outline = rows !== undefined && rows.turnOutline !== undefined ? rows.turnOutline.val : undefined;
@@ -142,19 +148,6 @@ function layout(options) {
     .filter((session) => options.showArchived || !archived.has(session.id))
     .map((session) => [session.id, session]));
   const known = new Map(sessions.map((session) => [session.id, session]));
-  const visibleAncestorOf = (session) => {
-    let cursor = session.parentSession;
-    const guard = new Set();
-    while (cursor !== undefined && cursor !== null && !guard.has(cursor)) {
-      guard.add(cursor);
-      const candidate = byId.get(cursor);
-      if (candidate !== undefined) return candidate;
-      const lineage = known.get(cursor);
-      if (lineage === undefined) return undefined;
-      cursor = lineage.parentSession;
-    }
-    return undefined;
-  };
   const sameTurn = (left, right) => left !== undefined && right !== undefined
     && left.seq === right.seq
     && String(left.prompt || '') === String(right.prompt || '')
@@ -172,33 +165,170 @@ function layout(options) {
     while (count < session.turns.length && session.turns[count].seq < boundary) count += 1;
     return count;
   };
+  // DSH 0.2.2 forks without parentSession: recover the source from the copied prefix.
+  // Hidden ancestors get resolved too, so a visible child can re-attach to the nearest
+  // ancestor that renders cards instead of floating.
+  const inferredParent = new Map();
+  {
+    let pool;
+    const candidatePool = () => {
+      if (pool !== undefined) return pool;
+      pool = [...known.values()];
+      return pool;
+    };
+    const resolved = new Map();
+    const inferParent = (child) => {
+      if (resolved.has(child.id)) return resolved.get(child.id);
+      resolved.set(child.id, undefined);
+      if (child.parentSession !== undefined) return undefined;
+      if (child.origin === 'subagent') return undefined;
+      if (typeof child.inheritedEventCount !== 'number' || child.inheritedEventCount <= 0) return undefined;
+      const k = exactTurns(child);
+      if (k === undefined || k <= 0) return undefined;
+      let best;
+      let bestRank;
+      for (const candidate of candidatePool()) {
+        if (candidate.id === child.id || candidate.origin === 'subagent') continue;
+        if (candidate.cwd !== undefined && child.cwd !== undefined && norm(candidate.cwd) !== norm(child.cwd)) continue;
+        if (candidate.turns.length < k) continue;
+        if (candidate.createdAt >= child.createdAt) continue;
+        let matches = true;
+        for (let index = 0; index < k; index += 1) {
+          if (!sameTurn(candidate.turns[index], child.turns[index])) {
+            matches = false;
+            break;
+          }
+        }
+        if (!matches) continue;
+        const forkLike = candidate.turns.length === k || Number(candidate.turns[k].seq) > child.inheritedEventCount - 1;
+        const rank = [forkLike ? 0 : 1, candidate.turns.length, -candidate.createdAt];
+        const better = bestRank === undefined
+          || rank[0] < bestRank[0]
+          || (rank[0] === bestRank[0] && rank[1] < bestRank[1])
+          || (rank[0] === bestRank[0] && rank[1] === bestRank[1] && rank[2] < bestRank[2]);
+        if (better) {
+          best = candidate;
+          bestRank = rank;
+        }
+      }
+      const parentId = best === undefined ? undefined : best.id;
+      resolved.set(child.id, parentId);
+      if (parentId !== undefined) inferredParent.set(child.id, parentId);
+      return parentId;
+    };
+    const queue = [...byId.values()];
+    const processed = new Set();
+    while (queue.length > 0 && processed.size < 500) {
+      const child = queue.shift();
+      if (child === undefined || processed.has(child.id)) continue;
+      processed.add(child.id);
+      const parentId = inferParent(child);
+      if (parentId === undefined) continue;
+      const parent = known.get(parentId);
+      if (parent !== undefined && !processed.has(parent.id)) queue.push(parent);
+    }
+  }
+  const parentIdOf = (session) => (inferredParent.get(session.id) !== undefined ? inferredParent.get(session.id) : session.parentSession);
+  const visibleAncestorOf = (session) => {
+    let cursor = parentIdOf(session);
+    const guard = new Set();
+    while (cursor !== undefined && cursor !== null && !guard.has(cursor)) {
+      guard.add(cursor);
+      const candidate = byId.get(cursor);
+      if (candidate !== undefined) return candidate;
+      const lineage = known.get(cursor);
+      if (lineage === undefined) return undefined;
+      cursor = parentIdOf(lineage);
+    }
+    return undefined;
+  };
+  const rendersCards = (session) => {
+    if (session.turns.length === 0) return false;
+    const exact = exactTurns(session);
+    if (exact !== undefined) return session.turns.length > exact;
+    return true;
+  };
+  const cardAncestorOf = (session) => {
+    let cursor = parentIdOf(session);
+    const guard = new Set();
+    while (cursor !== undefined && cursor !== null && !guard.has(cursor)) {
+      guard.add(cursor);
+      const candidate = byId.get(cursor);
+      if (candidate !== undefined) {
+        if (candidate.origin === 'subagent' || rendersCards(candidate)) return candidate;
+        cursor = parentIdOf(candidate);
+        continue;
+      }
+      const lineage = known.get(cursor);
+      if (lineage === undefined) return undefined;
+      cursor = parentIdOf(lineage);
+    }
+    return undefined;
+  };
+  const parentOf = new Map();
+  const childrenOf = new Map();
+  const roots = [];
+  for (const session of byId.values()) {
+    const nearest = visibleAncestorOf(session);
+    const anchor = session.origin === 'subagent' ? undefined : cardAncestorOf(session);
+    const ancestor = anchor !== undefined ? anchor : nearest;
+    parentOf.set(session.id, ancestor);
+    if (ancestor === undefined) {
+      roots.push(session);
+    } else {
+      let list = childrenOf.get(ancestor.id);
+      if (list === undefined) {
+        list = [];
+        childrenOf.set(ancestor.id, list);
+      }
+      list.push(session);
+    }
+  }
   const rows = [];
   const seen = new Set();
+  const rowOf = (id) => rows.find((row) => row.id === id);
   const walk = (session, depth) => {
     if (seen.has(session.id)) return;
     seen.add(session.id);
-    const directParent = session.parentSession === undefined ? undefined : known.get(session.parentSession);
-    const effectiveParent = visibleAncestorOf(session);
+    const directParentId = parentIdOf(session);
+    const directParent = directParentId === undefined ? undefined : known.get(directParentId);
+    const effectiveParent = parentOf.get(session.id);
     const exact = exactTurns(session);
     const directInherited = exact === undefined ? sharedPrefix(session, directParent) : exact;
-    const effectiveInherited = exact === undefined ? (effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent)) : exact;
+    const anchorPrefix = effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent);
+    const anchorHasTurns = effectiveParent !== undefined && effectiveParent.turns.length > 0;
+    const effectiveInherited = exact === undefined
+      ? anchorPrefix
+      : (effectiveParent === undefined ? 0 : (anchorHasTurns ? Math.min(exact, anchorPrefix) : exact));
+    const inherited = exact === undefined ? Math.max(directInherited, effectiveInherited) : exact;
+    const parentRow = effectiveParent === undefined ? undefined : rowOf(effectiveParent.id);
+    const anchorRendersCards = parentRow !== undefined && parentRow.visibleTo >= parentRow.visibleFrom;
+    const hiddenGap = effectiveParent !== undefined && directParentId !== undefined && effectiveParent.id !== directParentId;
+    const directParentVisible = directParentId !== undefined && byId.has(directParentId);
+    const directParentTurns = directParent === undefined ? [] : directParent.turns;
+    // A compact parent renders no cards, so the child shows the fork-point turn itself.
+    const compactParent = hiddenGap && directParentVisible && directParentTurns.length > 0 && rendersCards(directParent) === false;
+    let visibleFrom;
+    if (options.showInherited) visibleFrom = 0;
+    else if (!anchorRendersCards) visibleFrom = 0;
+    else if (hiddenGap) visibleFrom = Math.max(0, Math.min(effectiveInherited, inherited) - 1);
+    else visibleFrom = effectiveInherited;
     rows.push({
       id: session.id,
       turns: session.turns.length,
       depth,
       parentId: effectiveParent === undefined ? undefined : effectiveParent.id,
       directId: directParent === undefined ? undefined : directParent.id,
-      inherited: exact === undefined ? Math.max(directInherited, effectiveInherited) : exact,
+      inherited,
       effectiveInherited,
       forkCol: effectiveParent === undefined ? -1 : effectiveInherited - 1,
-      visibleFrom: options.showInherited || effectiveParent === undefined ? 0 : effectiveInherited,
+      visibleFrom,
       visibleTo: session.turns.length - 1,
       archived: archived.has(session.id),
-      hiddenGap: effectiveParent !== undefined && directParent !== undefined && directParent.id !== effectiveParent.id,
+      hiddenGap,
     });
-    for (const child of [...byId.values()].filter((candidate) => visibleAncestorOf(candidate)?.id === session.id)) walk(child, depth + 1);
+    for (const child of childrenOf.get(session.id) || []) walk(child, depth + 1);
   };
-  const roots = [...byId.values()].filter((session) => visibleAncestorOf(session) === undefined);
   roots.sort((a, b) => b.updatedAt - a.updatedAt);
   for (const root of roots) walk(root, 0);
   for (const session of byId.values()) if (!seen.has(session.id)) walk(session, 0);
@@ -358,6 +488,18 @@ function report(mode, options) {
     if (seen.has(key)) continue;
     seen.add(key);
     console.log('    ' + item.segment.label + ' hits card ' + item.card.session + ' row' + item.card.row + ' col' + item.card.col);
+  }
+  // A non-compact row that starts after column 0 needs a drawn incoming fork edge,
+  // otherwise its first turn floats with no visible predecessor or connector.
+  const incoming = new Set(edges.map((edge) => edge.toRow));
+  const dangling = rows.filter((row, index) => row.compact !== true && row.visibleTo >= 0 && row.visibleFrom > 0 && !incoming.has(index));
+  const detachedInherited = rows.filter((row) => row.compact !== true && row.inherited > 0 && row.visibleFrom === 0);
+  console.log('  dangling rows:', dangling.length, '| inherited prefix shown detached:', detachedInherited.length);
+  for (const row of dangling.slice(0, 10)) {
+    console.log('    ' + short(row.id) + ' starts at col' + row.visibleFrom + ' parent=' + short(row.parentId));
+  }
+  for (const row of detachedInherited.slice(0, 5)) {
+    console.log('    detached ' + short(row.id) + ' inh=' + row.inherited + ' parent=' + short(row.directId));
   }
 }
 

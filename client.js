@@ -273,6 +273,8 @@ window.__ModuleLoader__.load({
 			'row.forkedEmpty': '已分叉，尚无新对话',
 			'row.forkedHidden': '父会话不在视图 · 已显示继承历史',
 			'row.forkedVia': '从第 {turn} 轮分叉 · 中间会话已隐藏',
+			'row.inheritedFrom': '继承自「{title}」第 {turn} 轮',
+			'row.forkedCompact': '从第 {turn} 轮分叉 · 父会话尚无新对话',
 			'row.archived': '已归档',
 			'row.noOwnTurns': '尚无新对话',
 			'row.subagent': '子会话',
@@ -345,6 +347,8 @@ window.__ModuleLoader__.load({
 			'row.forkedEmpty': 'Forked, no new turns yet',
 			'row.forkedHidden': 'Parent not in view · inherited history shown',
 			'row.forkedVia': 'Forked from turn {turn} · intermediate Session hidden',
+			'row.inheritedFrom': 'Inherited "{title}" through turn {turn}',
+			'row.forkedCompact': 'Forked from turn {turn} · parent Session has no new turns',
 			'row.archived': 'Archived',
 			'row.noOwnTurns': 'no new turns',
 			'row.subagent': 'Sub-session',
@@ -533,9 +537,137 @@ window.__ModuleLoader__.load({
 				while (shared < leftTurns.length && shared < rightTurns.length && sameTurn(leftTurns[shared], rightTurns[shared])) shared += 1;
 				return shared;
 			};
+			/** Exact fork facts fetched from the Host: inherited event count and creation time. */
+			const exactInfoOf = (session) => {
+				const table = options.exact;
+				if (table === undefined || table === null) return undefined;
+				const value = table[session.id];
+				if (typeof value === 'number' && Number.isFinite(value)) return { inherited: value, createdAt: undefined };
+				if (value !== null && typeof value === 'object' && typeof value.inherited === 'number' && Number.isFinite(value.inherited)) {
+					return {
+						inherited: value.inherited,
+						createdAt: typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : undefined,
+					};
+				}
+				return undefined;
+			};
+			const createdAtOf = (session) => {
+				const info = exactInfoOf(session);
+				if (info !== undefined && info.createdAt !== undefined) return info.createdAt;
+				return typeof session.createdAt === 'number' && Number.isFinite(session.createdAt) ? session.createdAt : undefined;
+			};
+			const inheritedTurnsOf = (session) => {
+				const info = exactInfoOf(session);
+				if (info === undefined) return undefined;
+				const turns = turnsOf(session);
+				let count = 0;
+				while (count < turns.length && turns[count].seq < info.inherited) count += 1;
+				return count;
+			};
+			/**
+			 * Since DSH 0.2.2 an ordinary fork records no `parentSession`: the child keeps
+			 * the parent's exact event prefix but no lineage. The source is the Session
+			 * whose leading turns are that inherited prefix. Ranking prefers a candidate
+			 * that ends exactly at the cut, then the shortest matching history, then the
+			 * most recently created one: the fork chain should read as the nearest source.
+			 *
+			 * Hidden ancestors (archived, or blank forks the list filters out) need the same
+			 * resolution, so inference walks the parent chain as well instead of stopping at
+			 * the first filtered row; that is what lets a visible child re-attach to the
+			 * nearest ancestor that actually renders cards.
+			 */
+			const inferredParentId = new Map();
+			{
+				let pool;
+				const seenPool = new Set();
+				const candidatePool = () => {
+					if (pool !== undefined) return pool;
+					pool = [];
+					for (const session of group.sessions) {
+						if (seenPool.has(session.id)) continue;
+						seenPool.add(session.id);
+						pool.push(session);
+					}
+					if (known !== undefined && known !== null) {
+						const all = typeof known.values === 'function' ? [...known.values()] : Object.keys(known).map((id) => known[id]);
+						for (const session of all) {
+							if (session === undefined || session === null || seenPool.has(session.id)) continue;
+							seenPool.add(session.id);
+							pool.push(session);
+						}
+					}
+					return pool;
+				};
+				const resolved = new Map();
+				const inferParent = (child) => {
+					if (resolved.has(child.id)) return resolved.get(child.id);
+					resolved.set(child.id, undefined);
+					const explicitParent = child.parentId;
+					if (explicitParent !== undefined && explicitParent !== null && explicitParent !== '') return undefined;
+					if (child.origin === 'subagent') return undefined;
+					const info = exactInfoOf(child);
+					if (info === undefined || info.inherited <= 0) return undefined;
+					const k = inheritedTurnsOf(child);
+					if (k === undefined || k <= 0) return undefined;
+					const childTurns = turnsOf(child);
+					const childCreated = createdAtOf(child);
+					if (childCreated === undefined) return undefined;
+					const childCwd = normPath(child.cwd || '');
+					let best;
+					let bestRank;
+					for (const candidate of candidatePool()) {
+						if (candidate.id === child.id || candidate.origin === 'subagent') continue;
+						if (childCwd !== '' && normPath(candidate.cwd || '') !== childCwd) continue;
+						const candidateTurns = turnsOf(candidate);
+						if (candidateTurns.length < k) continue;
+						const candidateCreated = createdAtOf(candidate);
+						if (candidateCreated === undefined || candidateCreated >= childCreated) continue;
+						let matches = true;
+						for (let index = 0; index < k; index += 1) {
+							if (!sameTurn(candidateTurns[index], childTurns[index])) {
+								matches = false;
+								break;
+							}
+						}
+						if (!matches) continue;
+						const forkLike = candidateTurns.length === k || Number(candidateTurns[k].seq) > info.inherited - 1;
+						const rank = [forkLike ? 0 : 1, candidateTurns.length, -candidateCreated];
+						const better = bestRank === undefined
+							|| rank[0] < bestRank[0]
+							|| (rank[0] === bestRank[0] && rank[1] < bestRank[1])
+							|| (rank[0] === bestRank[0] && rank[1] === bestRank[1] && rank[2] < bestRank[2]);
+						if (better) {
+							best = candidate;
+							bestRank = rank;
+						}
+					}
+					const parentId = best === undefined ? undefined : best.id;
+					resolved.set(child.id, parentId);
+					if (parentId !== undefined) inferredParentId.set(child.id, parentId);
+					return parentId;
+				};
+				const queue = group.sessions.slice();
+				const processed = new Set();
+				while (queue.length > 0 && processed.size < 500) {
+					const child = queue.shift();
+					if (child === undefined || processed.has(child.id)) continue;
+					processed.add(child.id);
+					const parentId = inferParent(child);
+					if (parentId === undefined) continue;
+					const parent = knownOf(parentId);
+					if (parent !== undefined && !processed.has(parent.id)) queue.push(parent);
+				}
+			}
+			/** Parent id for lineage purposes: the recorded one, else the inferred fork source. */
+			const parentIdOf = (session) => {
+				const inferred = inferredParentId.get(session.id);
+				if (inferred !== undefined) return inferred;
+				const explicit = session.parentId;
+				return explicit === undefined || explicit === null || explicit === '' ? undefined : explicit;
+			};
 			/** Nearest ancestor that this view actually renders, skipping filtered-out Sessions. */
 			const visibleAncestorOf = (session) => {
-				let cursor = session.parentId;
+				let cursor = parentIdOf(session);
 				const guard = new Set();
 				let hops = 0;
 				while (cursor !== undefined && cursor !== null && !guard.has(cursor) && hops < 200) {
@@ -545,7 +677,43 @@ window.__ModuleLoader__.load({
 					if (candidate !== undefined) return candidate;
 					const lineage = knownOf(cursor);
 					if (lineage === undefined) return undefined;
-					cursor = lineage.parentId;
+					cursor = parentIdOf(lineage);
+				}
+				return undefined;
+			};
+			/**
+			 * Whether a Session renders turn cards at all. A fork whose inherited prefix
+			 * covers its whole log collapses into a slim row, so it can be neither a fork
+			 * edge origin nor the anchor of a child's inherited history.
+			 */
+			const rendersCards = (session) => {
+				const turns = turnsOf(session);
+				if (turns.length === 0) return false;
+				const exact = inheritedTurnsOf(session);
+				if (exact !== undefined) return turns.length > exact;
+				return true;
+			};
+			/**
+			 * Nearest visible ancestor that renders cards, so a fork cut through an archived
+			 * or fully-inherited ancestor still connects to a row that actually shows the
+			 * fork turn instead of leaving the child's own turns floating.
+			 */
+			const cardAncestorOf = (session) => {
+				let cursor = parentIdOf(session);
+				const guard = new Set();
+				let hops = 0;
+				while (cursor !== undefined && cursor !== null && !guard.has(cursor) && hops < 200) {
+					guard.add(cursor);
+					hops += 1;
+					const candidate = byId.get(cursor);
+					if (candidate !== undefined) {
+						if (candidate.origin === 'subagent' || rendersCards(candidate)) return candidate;
+						cursor = parentIdOf(candidate);
+						continue;
+					}
+					const lineage = knownOf(cursor);
+					if (lineage === undefined) return undefined;
+					cursor = parentIdOf(lineage);
 				}
 				return undefined;
 			};
@@ -554,7 +722,11 @@ window.__ModuleLoader__.load({
 			const children = new Map();
 			const roots = [];
 			for (const session of group.sessions) {
-				const ancestor = visibleAncestorOf(session);
+				const nearest = visibleAncestorOf(session);
+				// Ordinary Sessions prefer a card-bearing anchor; sub-agent chains keep the
+				// nearest visible row because their mini nodes are the chain itself.
+				const anchor = session.origin === 'subagent' ? undefined : cardAncestorOf(session);
+				const ancestor = anchor !== undefined ? anchor : nearest;
 				parentOf.set(session.id, ancestor);
 				if (ancestor !== undefined) {
 					let list = children.get(ancestor.id);
@@ -627,31 +799,40 @@ window.__ModuleLoader__.load({
 			// them, fall back to aligning turn content against the parent, because raw seqs
 			// are only unique inside one Session log: a child's own first turn can reuse the
 			// same seq number as the parent's next turn and be mistaken for an inherited one.
-			const exactTurnsOf = (session) => {
-				const table = options.exact;
-				if (table === undefined || table === null) return undefined;
-				const boundary = table[session.id];
-				if (typeof boundary !== 'number' || !Number.isFinite(boundary)) return undefined;
-				const turns = turnsOf(session);
-				let count = 0;
-				while (count < turns.length && turns[count].seq < boundary) count += 1;
-				return count;
-			};
+			const exactTurnsOf = (session) => inheritedTurnsOf(session);
 			const walk = (session, depth) => {
 				if (seen.has(session.id)) return;
 				seen.add(session.id);
 				const turns = turnsOf(session);
-				const directParent = session.parentId && session.parentId !== session.id ? knownOf(session.parentId) : undefined;
+				const resolvedParentId = parentIdOf(session);
+				const directParent = resolvedParentId !== undefined && resolvedParentId !== session.id ? knownOf(resolvedParentId) : undefined;
 				const effectiveParent = parentOf.get(session.id);
 				const exactInherited = exactTurnsOf(session);
 				const directInherited = exactInherited === undefined ? sharedPrefix(session, directParent) : exactInherited;
+				// Align to the anchor row, not blindly to the exact prefix: with a hidden or
+				// compact intermediate fork the anchor may share fewer turns than the child's
+				// own inherited prefix, and the extra ones must stay visible as faded turns.
+				const anchorPrefix = effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent);
+				const anchorHasTurns = effectiveParent !== undefined && turnsOf(effectiveParent).length > 0;
 				const effectiveInherited = exactInherited === undefined
-					? (effectiveParent === undefined ? 0 : sharedPrefix(session, effectiveParent))
-					: exactInherited;
+					? anchorPrefix
+					: (effectiveParent === undefined ? 0 : (anchorHasTurns ? Math.min(exactInherited, anchorPrefix) : exactInherited));
 				const inherited = exactInherited === undefined ? Math.max(directInherited, effectiveInherited) : exactInherited;
 				const rowCols = buildColumns(turns, rangesOf(session.id));
 				const parentRowForOffset = effectiveParent === undefined ? undefined : rowBySession.get(effectiveParent.id);
 				const isSubagent = session.origin === 'subagent';
+				// A card-bearing anchor is what a fork edge can connect to. When the cut runs
+				// through a hidden (archived) or fully-inherited (compact) ancestor, the edge
+				// must originate from the nearest row that actually renders cards.
+				const anchorRendersCards = parentRowForOffset !== undefined
+					&& parentRowForOffset.mini !== true
+					&& parentRowForOffset.visibleTo >= parentRowForOffset.visibleFrom;
+				const hiddenGap = effectiveParent !== undefined && resolvedParentId !== undefined && effectiveParent.id !== resolvedParentId;
+				const directParentVisible = resolvedParentId !== undefined && byId.has(resolvedParentId);
+				const directParentTurns = directParent === undefined ? [] : turnsOf(directParent);
+				// A "compact parent" is a visible fork that inherited its whole log and never
+				// continued: it renders no cards, so the child shows the fork-point turn itself.
+				const compactParent = hiddenGap && directParentVisible && directParentTurns.length > 0 && rendersCards(directParent) === false;
 				if (isSubagent && options.showSubagents !== true) {
 					// Collapsed: a sub-agent is not a lane of its own. Record it on the turn
 					// that spawned it so the parent node can show a short marker instead.
@@ -705,7 +886,7 @@ window.__ModuleLoader__.load({
 					return;
 				}
 				const freshSpawn = false;
-				const inheritedCount = effectiveParent === undefined ? 0 : Math.min(effectiveInherited, turns.length);
+				const inheritedCount = Math.min(effectiveInherited, turns.length);
 				let colOffset = 0;
 				if (parentRowForOffset !== undefined) {
 					if (parentRowForOffset.mini === true) {
@@ -719,11 +900,23 @@ window.__ModuleLoader__.load({
 						colOffset = parentRowForOffset.colOffset;
 					}
 				}
-				const visibleFrom = options.showInherited || effectiveParent === undefined ? 0 : effectiveInherited;
+				// Default view hides inherited history. Rules:
+				// - a card-bearing anchor: align to it; on a hidden/compact gap also show the
+				//   fork-point turn faded so the branch never starts floating;
+				// - no card-bearing anchor (all ancestors archived or absorbed): show the whole
+				//   inherited prefix faded instead of dangling the first own turn.
+				let visibleFrom;
+				if (options.showInherited) visibleFrom = 0;
+				else if (!anchorRendersCards) visibleFrom = 0;
+				else if (hiddenGap) visibleFrom = Math.max(0, Math.min(effectiveInherited, inherited) - 1);
+				else visibleFrom = effectiveInherited;
 				// Never let a shifted row start left of column 0 (possible when the parent
 				// compacted columns and this row shows its inherited prefix as well).
 				const firstRelative = rowCols[visibleFrom] === undefined ? visibleFrom : rowCols[visibleFrom];
 				if (colOffset + firstRelative < 0) colOffset = -firstRelative;
+				const parentHiddenTitle = hiddenGap && !directParentVisible && directParent !== undefined
+					? String(directParent.title || directParent.displayTitle || String(directParent.id).slice(0, 8))
+					: '';
 				const row = {
 					session: session,
 					depth: depth,
@@ -731,7 +924,9 @@ window.__ModuleLoader__.load({
 					parent: effectiveParent,
 					directParent: directParent,
 					inherited: inherited,
-					hiddenGap: effectiveParent !== undefined && directParent !== undefined && directParent.id !== effectiveParent.id,
+					hiddenGap: hiddenGap,
+					compactParent: compactParent,
+					parentHiddenTitle: parentHiddenTitle,
 					forkCol: effectiveParent === undefined ? -1 : effectiveInherited - 1,
 					visibleFrom: visibleFrom,
 					visibleTo: turns.length - 1,
@@ -1434,32 +1629,65 @@ window.__ModuleLoader__.load({
 				if (activeGroup === undefined) return undefined;
 				if (typeof document === 'undefined' || typeof document.baseURI !== 'string' || typeof fetch !== 'function') return undefined;
 				const ids = [];
+				const pendingId = new Set();
+				const addId = (sessionId) => {
+					if (pendingId.has(sessionId)) return;
+					if (Object.prototype.hasOwnProperty.call(exactInheritanceStored, sessionId)) return;
+					if (exactPending.current[sessionId] === true) return;
+					pendingId.add(sessionId);
+					ids.push(sessionId);
+				};
 				for (const session of activeGroup.sessions) {
-					if (session.parentId === undefined || session.parentId === null || session.parentId === '') continue;
-					if (Object.prototype.hasOwnProperty.call(exactInheritanceStored, session.id)) continue;
-					if (exactPending.current[session.id] === true) continue;
-					ids.push(session.id);
+					// Every Session is queried: since DSH 0.2.2 an ordinary fork keeps no
+					// parentSession, so a seeded Session can only be recognized by its exact
+					// inherited prefix (plus createdAt for ranking candidate sources).
+					addId(session.id);
+				}
+				// Blank and archived Sessions never render, but they can still be the direct
+				// fork source; their facts (createdAt, inherited count) feed the source ranking
+				// so the visible child connects to the nearest visible ancestor instead.
+				const groupPath = activeGroup.path === undefined || activeGroup.path === null ? '' : normPath(activeGroup.path);
+				const allById = sessionsState === undefined || sessionsState.byId === undefined || sessionsState.byId === null ? undefined : sessionsState.byId;
+				if (groupPath !== '' && allById !== undefined) {
+					const entries = typeof allById.values === 'function' ? [...allById.values()] : Object.keys(allById).map((id) => allById[id]);
+					for (const session of entries) {
+						if (session === undefined || session === null || session.cwd === undefined) continue;
+						if (normPath(session.cwd) !== groupPath) continue;
+						addId(session.id);
+					}
 				}
 				if (ids.length === 0) return undefined;
 				let cancelled = false;
 				const resolveChunk = async (chunk) => {
 					for (const sessionId of chunk) exactPending.current[sessionId] = true;
-					let counts = null;
+					let table = null;
 					try {
 						const url = new URL(INHERITANCE_ROUTE + '?ids=' + encodeURIComponent(chunk.join(',')), document.baseURI);
 						const response = await fetch(url.href, { credentials: 'same-origin' });
 						if (response !== undefined && response !== null && response.ok === true) {
 							const payload = await response.json();
-							counts = payload !== null && typeof payload === 'object' && payload.counts !== undefined && payload.counts !== null && typeof payload.counts === 'object'
-								? payload.counts
-								: payload;
+							if (payload !== null && typeof payload === 'object') {
+								if (payload.sessions !== undefined && payload.sessions !== null && typeof payload.sessions === 'object') table = payload.sessions;
+								else if (payload.counts !== undefined && payload.counts !== null && typeof payload.counts === 'object') table = payload.counts;
+								else table = payload;
+							}
 						}
 					} catch (error) {
-						counts = null;
+						table = null;
 					}
 					for (const sessionId of chunk) {
-						const value = counts === null || typeof counts !== 'object' ? undefined : counts[sessionId];
-						exactInheritanceStored[sessionId] = typeof value === 'number' && Number.isFinite(value) ? value : null;
+						const raw = table === null || typeof table !== 'object' ? undefined : table[sessionId];
+						let inherited;
+						let createdAt;
+						if (typeof raw === 'number') {
+							inherited = raw;
+						} else if (raw !== null && typeof raw === 'object') {
+							inherited = raw.inherited;
+							createdAt = raw.createdAt;
+						}
+						exactInheritanceStored[sessionId] = typeof inherited === 'number' && Number.isFinite(inherited)
+							? { inherited: inherited, createdAt: typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : undefined }
+							: null;
 					}
 				};
 				const run = async () => {
@@ -1817,9 +2045,11 @@ window.__ModuleLoader__.load({
 						? (row.forkCol >= 0
 							? formatTemplate(tr('row.spawnedAt'), { turn: row.forkCol + 1 })
 							: tr('row.spawned'))
-						: (row.parent !== undefined && row.forkCol >= 0
-							? formatTemplate(tr(row.hiddenGap ? 'row.forkedVia' : 'row.forked'), { turn: row.forkCol + 1 })
-							: (row.directParent !== undefined && row.inherited > 0 ? tr('row.forkedHidden') : '')));
+						: (row.parentHiddenTitle !== undefined && row.parentHiddenTitle !== '' && row.inherited > 0
+							? formatTemplate(tr('row.inheritedFrom'), { title: row.parentHiddenTitle, turn: Math.max(1, row.inherited) })
+							: (row.parent !== undefined && row.forkCol >= 0
+								? formatTemplate(tr(row.compactParent ? 'row.forkedCompact' : (row.hiddenGap ? 'row.forkedVia' : 'row.forked')), { turn: row.forkCol + 1 })
+								: (row.directParent !== undefined && row.inherited > 0 ? tr('row.forkedHidden') : ''))));
 				const metaText = [
 					row.turns.length + ' ' + tr('unit.turns'),
 					formatWhen(session.updatedAt, zh),

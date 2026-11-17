@@ -329,6 +329,82 @@ renderScenario('merge clipped to visible inherited range', makeSessions(['s1', '
   has: ['st-merge'],
   counts: { 'st-card': 6, 'st-merge': 1 },
 });
+function makeParentlessFork(includeSource) {
+  // DSH 0.2.2 forks ordinary Sessions without recording parentSession: the child only
+  // keeps the copied event prefix, so the tree has to recover the source by content.
+  const parentTurnsList = turns(5, 0, 1);
+  const source = { id: 'R1', title: 'Source', displayTitle: 'Source', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 5000, projectionValues: { turnOutline: parentTurnsList } };
+  const child = {
+    id: 'R2',
+    title: 'Fork',
+    displayTitle: 'Fork',
+    cwd: 'D:\\proj',
+    running: false,
+    blank: false,
+    updatedAt: 4000,
+    projectionValues: { turnOutline: [parentTurnsList[0], parentTurnsList[1], { turn: 3, seq: 24, prompt: 'own prompt', response: 'own reply' }] },
+  };
+  const byId = includeSource === true ? { R1: source, R2: child } : { R2: child };
+  return { ids: Object.keys(byId), byId };
+}
+
+renderScenario('parentless fork gets its source inferred', makeParentlessFork(true), workspace, {
+  13: { R1: { inherited: 0, createdAt: 1000 }, R2: { inherited: 8, createdAt: 2000 } },
+}, {
+  has: ['st-edge', 'st-label-fork', 'CARDLEFT:430px'],
+  absent: ['data-compact'],
+  counts: { 'st-edge': 1, 'st-card': 6 },
+});
+renderScenario('parentless fork without a source shows its inherited prefix', makeParentlessFork(false), workspace, {
+  13: { R2: { inherited: 8, createdAt: 2000 } },
+}, {
+  has: ['st-card', 'CARDLEFT:430px', 'CARDLEFT:224px'],
+  absent: ['st-edge'],
+  counts: { 'st-card': 3 },
+});
+
+function makeCompactParentChain() {
+  // A fork cut through an ancestor that itself never continued (compact row): the
+  // grandchild must connect to the nearest card-bearing ancestor and show the fork turn.
+  const base = turns(8, 0, 1);
+  const p = { id: 'M1', title: 'Base', displayTitle: 'Base', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 5000, projectionValues: { turnOutline: base } };
+  const shrink = { id: 'M2', title: 'Shrunk fork', displayTitle: 'Shrunk fork', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 4000, projectionValues: { turnOutline: base } };
+  const grandchild = { id: 'M3', title: 'Grandchild', displayTitle: 'Grandchild', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 3000, projectionValues: { turnOutline: [...base, ...turns(2, 40, 9)] } };
+  return { ids: ['M1', 'M2', 'M3'], byId: { M1: p, M2: shrink, M3: grandchild } };
+}
+
+renderScenario('fork through a compact ancestor stays connected', makeCompactParentChain(), workspace, {
+  13: {
+    M1: { inherited: 0, createdAt: 1000 },
+    M2: { inherited: 29, createdAt: 2000 },
+    M3: { inherited: 29, createdAt: 3000 },
+  },
+}, {
+  has: ['st-card', 'st-edge', 'st-edge-gap', 'st-label-fork', 'CARDLEFT:1460px'],
+  counts: { 'st-card': 11, 'st-edge': 1, 'st-merge': 0 },
+});
+
+function makeHiddenDirectParentChain() {
+  // The direct fork source is a fork that never continued, so the list hides it as blank;
+  // the way back must go through the nearest visible ancestor that renders cards.
+  const base = turns(8, 0, 1);
+  const root = { id: 'H1', title: 'Root', displayTitle: 'Root', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 5000, projectionValues: { turnOutline: base } };
+  const blankParent = { id: 'H2', title: 'Blank fork', displayTitle: 'Blank fork', cwd: 'D:\\proj', running: false, blank: true, updatedAt: 4000, projectionValues: { turnOutline: base } };
+  const child = { id: 'H3', title: 'Child', displayTitle: 'Child', cwd: 'D:\\proj', running: false, blank: false, updatedAt: 3000, projectionValues: { turnOutline: [...base, ...turns(2, 40, 9)] } };
+  return { ids: ['H1', 'H3'], byId: { H1: root, H2: blankParent, H3: child } };
+}
+
+renderScenario('fork through a hidden direct parent reaches the visible ancestor', makeHiddenDirectParentChain(), workspace, {
+  13: {
+    H1: { inherited: 0, createdAt: 1000 },
+    H2: { inherited: 29, createdAt: 2000 },
+    H3: { inherited: 29, createdAt: 3000 },
+  },
+}, {
+  has: ['st-card', 'st-edge', 'st-edge-gap', 'st-label-fork', 'CARDLEFT:1460px'],
+  counts: { 'st-card': 11, 'st-edge': 1 },
+});
+
 renderScenario('select mode toolbar', makeSessions(['s1', 's2']), workspace, { 14: true, 16: { sessionId: 's1', anchor: 1, focus: 3 } }, {
   has: ['st-toolbar', 'st-toolbar-primary', 'data-selectable', 'data-selected'],
   counts: { 'st-card': 7 },
@@ -382,7 +458,9 @@ renderScenario('archived parent', makeSessions(['s1', 's2']), { ...workspace, ar
 });
 renderScenario('archived middle of chain', makeChain(['c1', 'c3']), { ...workspace, archivedSessionIds: ['c2'] }, undefined, {
   has: ['st-card', 'st-label-fork', 'st-edge', 'st-edge-gap'],
-  counts: { 'st-edge': 1, 'st-card': 8 },
+  // c3 inherited 4 turns from the archived c2 but shares 3 with the visible c1, so it
+  // keeps the fork-point turn (index 2) plus the hidden-middle turn faded, then its own.
+  counts: { 'st-edge': 1, 'st-card': 9 },
 });
 renderScenario('chain fully visible', makeChain(['c1', 'c2', 'c3']), workspace, undefined, {
   has: ['st-card', 'st-edge'],

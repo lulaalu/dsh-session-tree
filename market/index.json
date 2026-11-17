@@ -36,6 +36,18 @@
       },
       "versions": [
         {
+          "version": "0.1.3",
+          "publishTimestamp": 1794898314,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lulaalu/dsh-session-tree.git",
+            "commit": "63ca92265d230408a136f39c0384437e7630eb21"
+          },
+          "engines": {
+            "dsh": ">=0.2.0 <0.3.0"
+          }
+        },
+        {
           "version": "0.1.2",
           "publishTimestamp": 1794724966,
           "source": {

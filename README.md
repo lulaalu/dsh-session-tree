@@ -84,7 +84,7 @@ dsh --version
 
 ```powershell
 # 固定到发布标签
-dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.2
+dsh plugin --profile web add github:lulaalu/dsh-session-tree#v0.1.3
 ```
 
 桌面 App 用 `--profile desktop`。也可以在 DSH 的插件页面（或让 Agent 调 `plugin_manager`）用包 spec 安装：
@@ -124,7 +124,7 @@ dsh plugin --profile web add D:\path\to\dsh-session-tree
 
 ```powershell
 pnpm pack
-dsh plugin --profile web add .\lulaalu-dsh-session-tree-0.1.2.tgz
+dsh plugin --profile web add .\lulaalu-dsh-session-tree-0.1.3.tgz
 ```
 
 ### 卸载
